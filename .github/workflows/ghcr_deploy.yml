@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "kts/**"
+      - "kts"
     tags:
       - "v*kts*"
   workflow_dispatch:
