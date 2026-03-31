@@ -1350,6 +1350,14 @@ def completion_cost(
     try:
         call_type = _infer_call_type(call_type, completion_response) or "completion"
 
+        if optional_params and call_type in ("image_generation", "aimage_generation"):
+            if quality is None:
+                quality = optional_params.get("quality")
+            if size is None:
+                size = optional_params.get("size")
+            if n is None:
+                n = optional_params.get("n")
+
         if call_type == CallTypes.aresponses_websocket.value and isinstance(
             completion_response, LiteLLMRealtimeStreamLoggingObject
         ):
