@@ -1832,6 +1832,14 @@ def completion_cost(
         if pricing_provider is not None:
             custom_llm_provider = pricing_provider  # rebind-ok: model_info.pricing_provider overrides the routing provider for cost-map lookups
 
+        if optional_params and call_type in ("image_generation", "aimage_generation"):
+            if quality is None:
+                quality = optional_params.get("quality")
+            if size is None:
+                size = optional_params.get("size")
+            if n is None:
+                n = optional_params.get("n")
+
         if call_type == CallTypes.aresponses_websocket.value and isinstance(
             completion_response, LiteLLMRealtimeStreamLoggingObject
         ):
