@@ -31,6 +31,6 @@ RUN LITELLM_DIR="$(python -c 'import litellm, os; print(os.path.dirname(litellm.
     rm -rf /tmp/kts
 
 ARG EXTRA_INDEX_URL
-ARG AP_LITELLM_MODULES_VERSION=0.2.5
+ARG AP_LITELLM_MODULES_VERSION=0.2.2
 RUN pip install --no-cache-dir --extra-index-url "${EXTRA_INDEX_URL}" \
     "ap-litellm-modules==${AP_LITELLM_MODULES_VERSION}"
