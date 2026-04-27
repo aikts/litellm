@@ -83,4 +83,4 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ env.UPSTREAM_IMAGE }}:${{ steps.base.outputs.tag }}
             EXTRA_INDEX_URL=${{ secrets.KTS_PIP_EXTRA_INDEX_URL }}
-            AP_LITELLM_MODULES_VERSION=0.2.1
+            AP_LITELLM_MODULES_VERSION=0.2.5
