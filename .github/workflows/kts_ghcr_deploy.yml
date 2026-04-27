@@ -1,4 +1,15 @@
-name: Build and Push KTS Image
+name: Build and Push KTS Images
+
+# Two-stage build:
+#
+#   1. "public" — overlays open-source patches on the upstream litellm-database
+#      image. Pushed to ghcr.io. Built on every branch push and on every tag.
+#      For tags ending in "-kts.<N>" the public image carries the upstream tag
+#      without the suffix (e.g. tag "v1.83.3-kts.1" → public image "v1.83.3").
+#
+#   2. "kts" — adds the private ap-litellm-modules on top of the public image.
+#      Pushed to the private KTS registry only. Built only on tags matching
+#      "v*-kts.*" — never on branches.
 
 on:
   push:
@@ -8,7 +19,7 @@ on:
       - "kts/**"
       - "kts_v*"
     tags:
-      - "v*kts*"
+      - "v*"
   workflow_dispatch:
     inputs:
       upstream_tag:
@@ -18,15 +29,19 @@ on:
 
 env:
   UPSTREAM_IMAGE: ghcr.io/berriai/litellm-database
+  PUBLIC_IMAGE: ghcr.io/${{ github.repository_owner }}/litellm-database
   # Default upstream tag for this stable branch. Override via workflow_dispatch input.
   DEFAULT_UPSTREAM_TAG: v1.83.3-stable
 
 jobs:
-  build-and-push-image-kts:
+  build-public:
+    name: Build and push public overlay image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      public_ref: ${{ steps.publicref.outputs.ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,13 +53,6 @@ jobs:
           if [ -z "$TAG" ]; then TAG="${DEFAULT_UPSTREAM_TAG}"; fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Log in to private container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.KTS_REGISTRY_URL }}
-          username: ${{ secrets.KTS_REGISTRY_USERNAME }}
-          password: ${{ secrets.KTS_REGISTRY_PASSWORD }}
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -52,18 +60,72 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata for public image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.PUBLIC_IMAGE }}
+          # For "v*-kts.*" tags, the public image strips the "-kts.*" suffix —
+          # so a git tag "v1.83.3-kts.1" produces public image tag "v1.83.3".
+          # For tags without "-kts.", apply the tag verbatim.
+          tags: |
+            type=match,pattern=^(v.*?)-kts\..*$,group=1,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=ref,event=branch
+            type=ref,event=tag,enable=${{ !contains(github.ref, '-kts.') }}
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push public overlay image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.public
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_IMAGE=${{ env.UPSTREAM_IMAGE }}:${{ steps.base.outputs.tag }}
+
+      - name: Expose public image ref by digest
+        id: publicref
+        run: |
+          echo "ref=${PUBLIC_IMAGE}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  build-kts:
+    name: Build and push KTS (private) image
+    needs: build-public
+    # Only run for tags that match "v*-kts.*" — never for branches.
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-kts.')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to private container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.KTS_REGISTRY_URL }}
+          username: ${{ secrets.KTS_REGISTRY_USERNAME }}
+          password: ${{ secrets.KTS_REGISTRY_PASSWORD }}
+
       - name: Extract metadata for KTS image
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ secrets.KTS_REGISTRY_URL }}${{ secrets.KTS_REPOSITORY_PREFIX }}/litellm-database
-            ghcr.io/${{ github.repository_owner }}/litellm-database
+          images: ${{ secrets.KTS_REGISTRY_URL }}${{ secrets.KTS_REPOSITORY_PREFIX }}/litellm-database
           tags: |
-            type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -81,6 +143,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           build-args: |
-            BASE_IMAGE=${{ env.UPSTREAM_IMAGE }}:${{ steps.base.outputs.tag }}
+            BASE_IMAGE=${{ needs.build-public.outputs.public_ref }}
             EXTRA_INDEX_URL=${{ secrets.KTS_PIP_EXTRA_INDEX_URL }}
             AP_LITELLM_MODULES_VERSION=0.2.2
