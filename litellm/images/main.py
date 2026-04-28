@@ -290,8 +290,8 @@ def image_generation(
         metadata: Final = kwargs.get("metadata", {})
         litellm_logging_obj: Final[LiteLLMLoggingObj] = kwargs.get("litellm_logging_obj")
         client: Final = kwargs.get("client", None)
-        extra_headers: Final = kwargs.get("extra_headers", None)
-        headers: Final[dict] = kwargs.get("headers", None) or {}
+        extra_headers: Final = kwargs.pop("extra_headers", None)
+        headers: Final[dict] = kwargs.pop("headers", None) or {}
         base_model: Final = kwargs.get("base_model", None)
         call_kwargs: Final = cast(Mapping[str, object], kwargs)  # cast-ok: image_generation's **kwargs is untyped
         max_retries: Final = call_kwargs.get("max_retries")
