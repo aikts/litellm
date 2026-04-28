@@ -18,6 +18,7 @@ USER root
 
 # ---- PATCHED FILES (add one COPY per patched file, keep the source path) ----
 COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
+COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
 # ---- end patched files ----
 
 RUN LITELLM_DIR="$(python -c 'import litellm, os; print(os.path.dirname(litellm.__file__))')" && \
