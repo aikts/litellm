@@ -82,3 +82,73 @@ class TestImageGenerationExtraHeaders:
         )
 
         assert "extra_headers" not in optional_params
+
+    @patch("litellm.images.main.openai_chat_completions")
+    def test_extra_headers_not_leaked_into_extra_body_gpt_image_1(
+        self, mock_openai_chat_completions
+    ):
+        """
+        Regression test for KTS fork: extra_headers passed via litellm_params
+        (e.g. from proxy config.yaml) for openai/gpt-image-1 must NOT leak into
+        optional_params["extra_body"]. If they do, the OpenAI API rejects the
+        request with `Unknown parameter: 'extra_headers'` because extra_body is
+        serialized as JSON body.
+        """
+        mock_image_response = litellm.utils.ImageResponse(
+            created=1234567890,
+            data=[{"url": "https://example.com/image.png"}],
+        )
+        mock_openai_chat_completions.image_generation.return_value = (
+            mock_image_response
+        )
+
+        extra_headers = {"X-AgentPlatform-Proxy-Key": "secret"}
+
+        image_generation(
+            model="openai/gpt-image-1",
+            prompt="A red circle",
+            extra_headers=extra_headers,
+        )
+
+        mock_openai_chat_completions.image_generation.assert_called_once()
+        call_kwargs = mock_openai_chat_completions.image_generation.call_args
+        optional_params = call_kwargs.kwargs.get(
+            "optional_params", call_kwargs[1].get("optional_params", {})
+        )
+
+        assert optional_params.get("extra_headers") == extra_headers
+        extra_body = optional_params.get("extra_body") or {}
+        assert "extra_headers" not in extra_body
+        assert "headers" not in extra_body
+
+    @patch("litellm.images.main.openai_chat_completions")
+    def test_headers_kwarg_not_leaked_into_extra_body_gpt_image_1(
+        self, mock_openai_chat_completions
+    ):
+        """
+        `headers` kwarg should also be popped before the non_default_params
+        sweep so it is never sent inside extra_body.
+        """
+        mock_image_response = litellm.utils.ImageResponse(
+            created=1234567890,
+            data=[{"url": "https://example.com/image.png"}],
+        )
+        mock_openai_chat_completions.image_generation.return_value = (
+            mock_image_response
+        )
+
+        image_generation(
+            model="openai/gpt-image-1",
+            prompt="A red circle",
+            headers={"X-AgentPlatform-Proxy-Key": "secret"},
+        )
+
+        mock_openai_chat_completions.image_generation.assert_called_once()
+        call_kwargs = mock_openai_chat_completions.image_generation.call_args
+        optional_params = call_kwargs.kwargs.get(
+            "optional_params", call_kwargs[1].get("optional_params", {})
+        )
+
+        extra_body = optional_params.get("extra_body") or {}
+        assert "headers" not in extra_body
+        assert "extra_headers" not in extra_body
