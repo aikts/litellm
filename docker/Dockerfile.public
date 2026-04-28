@@ -21,8 +21,17 @@ COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
 COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
 # ---- end patched files ----
 
-RUN LITELLM_DIR="$(python -c 'import litellm, os; print(os.path.dirname(litellm.__file__))')" && \
-    test -d "$LITELLM_DIR" && \
-    cp -rv /tmp/overlay/litellm/. "$LITELLM_DIR/" && \
-    find "$LITELLM_DIR" -name '__pycache__' -type d -exec rm -rf {} + && \
+# Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
+# from) via sysconfig — NOT `import litellm` which can be shadowed by /app/litellm
+# when cwd is on sys.path. Then mirror the overlay into every existing copy
+# (site-packages + any /app/litellm source tree shipped by upstream) so it is
+# patched regardless of which one Python ends up resolving at runtime.
+RUN PURELIB="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
+    TARGETS="$PURELIB/litellm" && \
+    [ -d /app/litellm ] && TARGETS="$TARGETS /app/litellm" || true && \
+    for d in $TARGETS; do \
+      test -d "$d" && \
+      cp -rv /tmp/overlay/litellm/. "$d/" && \
+      find "$d" -name '__pycache__' -type d -exec rm -rf {} + ; \
+    done && \
     rm -rf /tmp/overlay
