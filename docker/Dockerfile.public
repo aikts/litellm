@@ -1,0 +1,37 @@
+# Public overlay image.
+#
+# Takes the upstream-published litellm-database image and layers our open-source
+# Python patches on top. No private dependencies — safe to publish to ghcr.io.
+#
+# Build args:
+#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.83.3-stable
+#
+# To patch a new file:
+#   1. Edit it in the source tree (litellm/<path>).
+#   2. Add ONE line below the "PATCHED FILES" marker that mirrors the same
+#      relative path into /tmp/overlay/. No second copy to keep in sync.
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER root
+
+# ---- PATCHED FILES (add one COPY per patched file, keep the source path) ----
+COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
+COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
+# ---- end patched files ----
+
+# Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
+# from) via sysconfig — NOT `import litellm` which can be shadowed by /app/litellm
+# when cwd is on sys.path. Then mirror the overlay into every existing copy
+# (site-packages + any /app/litellm source tree shipped by upstream) so it is
+# patched regardless of which one Python ends up resolving at runtime.
+RUN PURELIB="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
+    TARGETS="$PURELIB/litellm" && \
+    [ -d /app/litellm ] && TARGETS="$TARGETS /app/litellm" || true && \
+    for d in $TARGETS; do \
+      test -d "$d" && \
+      cp -rv /tmp/overlay/litellm/. "$d/" && \
+      find "$d" -name '__pycache__' -type d -exec rm -rf {} + ; \
+    done && \
+    rm -rf /tmp/overlay
