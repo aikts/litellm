@@ -29,6 +29,7 @@ from litellm.proxy.route_priority import (
     configured_pass_through_routes_first,
     hot_routes_first,
 )
+from litellm.secret_managers.main import get_secret_bool
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
@@ -74,7 +75,9 @@ class LazyFeature:
         return any(path.startswith(p) for p in self.path_prefixes) or any(path.endswith(s) for s in self.path_suffixes)
 
 
-LAZY_FEATURES: Final[tuple[LazyFeature, ...]] = (
+LAZY_FEATURES: Final[tuple[LazyFeature, ...]] = tuple(
+    feature
+    for feature in (
     LazyFeature(
         name="guardrails",
         module_path="litellm.proxy.guardrails.guardrail_endpoints",
@@ -340,8 +343,9 @@ LAZY_FEATURES: Final[tuple[LazyFeature, ...]] = (
         module_path="litellm.proxy.management_endpoints.access_group_endpoints",
         path_prefixes=("/access_group", "/v1/access_group", "/v1/unified_access_group"),
     ),
+    )
+    if feature.name != "llm_passthrough" or not get_secret_bool("DISABLE_LLM_PASSTHROUGH_ROUTES", False)
 )
-
 
 class LazyFeatureMiddleware:
     """ASGI middleware that imports + registers a feature router on first
