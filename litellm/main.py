@@ -7702,7 +7702,7 @@ def transcription(
     metadata: Final = kwargs.get("metadata", None)
     atranscription: Final = kwargs.pop("atranscription", False)
     litellm_logging_obj: Final[LiteLLMLoggingObj] = kwargs.get("litellm_logging_obj")
-    extra_headers: Final = kwargs.get("extra_headers", None)
+    extra_headers: Final = kwargs.pop("extra_headers", None)
     shared_session: Final = kwargs.get("shared_session", None)
     kwargs.pop("tags", [])
     non_default_params: Final = get_non_default_transcription_params(kwargs)
@@ -7808,6 +7808,10 @@ def transcription(
         # set API KEY
 
         api_key = api_key or litellm.api_key or litellm.openai_key or get_secret("OPENAI_API_KEY")
+
+        if extra_headers:
+            optional_params["extra_headers"] = extra_headers
+
         response = openai_audio_transcriptions.audio_transcriptions(
             model=model,
             audio_file=file,
@@ -7995,7 +7999,7 @@ def speech(
     user: Final = kwargs.get("user", None)
     litellm_call_id: Final[str | None] = kwargs.get("litellm_call_id", None)
     proxy_server_request: Final = kwargs.get("proxy_server_request", None)
-    extra_headers: Final = kwargs.get("extra_headers", None)
+    extra_headers: Final = kwargs.pop("extra_headers", None)
     model_info: Final = kwargs.get("model_info", None)
     shared_session: Final = kwargs.get("shared_session", None)
     model, custom_llm_provider, dynamic_api_key, api_base = get_llm_provider(
@@ -8088,6 +8092,9 @@ def speech(
         )
 
         headers = headers or litellm.headers
+
+        if extra_headers:
+            optional_params["extra_headers"] = extra_headers
 
         response = openai_chat_completions.audio_speech(
             model=model,
