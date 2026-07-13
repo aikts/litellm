@@ -19,6 +19,8 @@ USER root
 # ---- PATCHED FILES (add one COPY per patched file, keep the source path) ----
 COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
 COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
+COPY litellm/main.py /tmp/overlay/litellm/main.py
+COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py
 # ---- end patched files ----
 
 # Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
