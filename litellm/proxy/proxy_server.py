@@ -15161,7 +15161,12 @@ app.include_router(search_router)
 app.include_router(image_router)
 app.include_router(fine_tuning_router)
 app.include_router(credential_router)
-app.include_router(llm_passthrough_router)
+# kts: the built-in provider pass-through routes (/openai, /openai_passthrough, /anthropic,
+# /vertex-ai, /gemini, ...) forward the request body verbatim to the upstream provider using the
+# proxy's OWN credentials, bypassing model_list / model access-groups / billing. We route all
+# traffic through model_list, so expose them only when explicitly opted in.
+if not get_secret_bool("DISABLE_LLM_PASSTHROUGH_ROUTES", False):
+    app.include_router(llm_passthrough_router)
 app.include_router(pass_through_router)
 app.include_router(health_router)
 app.include_router(key_management_router)
