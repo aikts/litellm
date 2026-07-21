@@ -19,6 +19,8 @@ USER root
 # ---- PATCHED FILES (add one COPY per patched file, keep the source path) ----
 COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
 COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
+COPY litellm/litellm_core_utils/streaming_handler.py /tmp/overlay/litellm/litellm_core_utils/streaming_handler.py
+COPY litellm/llms/openrouter/chat/transformation.py /tmp/overlay/litellm/llms/openrouter/chat/transformation.py
 COPY litellm/main.py /tmp/overlay/litellm/main.py
 COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py
 # ---- end patched files ----
