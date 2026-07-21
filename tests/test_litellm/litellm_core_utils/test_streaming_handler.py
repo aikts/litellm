@@ -2493,3 +2493,72 @@ async def test_stream_chunk_builder_raise_and_usage_recovery_failure_does_not_cr
             chunks = [c async for c in response]
 
     assert len(chunks) > 0
+
+
+def _openrouter_signature_chunk(with_reasoning_details: bool) -> ModelResponseStream:
+    """Trailing OpenRouter chunk that only carries the thinking-block signature."""
+    delta: dict = {"content": "", "role": "assistant"}
+    if with_reasoning_details:
+        delta["reasoning_details"] = [
+            {
+                "type": "reasoning.text",
+                "signature": "EpgCCokBCA8YAipA",
+                "format": "anthropic-claude-v1",
+                "index": 0,
+            }
+        ]
+    return ModelResponseStream(
+        **{
+            "id": "gen-test",
+            "object": "chat.completion.chunk",
+            "created": 1741037890,
+            "model": "anthropic/claude-opus-4.6",
+            "choices": [
+                {"index": 0, "delta": delta, "logprobs": None, "finish_reason": None}
+            ],
+        }
+    )
+
+
+def test_is_chunk_non_empty_with_reasoning_details_signature(
+    initialized_custom_stream_wrapper: CustomStreamWrapper,
+):
+    """
+    OpenRouter streams the Anthropic thinking-block signature in a trailing
+    reasoning_details delta with empty content. Dropping it as "empty" loses the
+    signature, and the next turn fails with `Invalid 'signature' in 'thinking' block`.
+    """
+    initialized_custom_stream_wrapper.sent_first_chunk = True
+
+    assert (
+        initialized_custom_stream_wrapper.is_chunk_non_empty(
+            completion_obj={"content": ""},
+            model_response=ModelResponseStream(),
+            response_obj={
+                "original_chunk": _openrouter_signature_chunk(
+                    with_reasoning_details=True
+                )
+            },
+        )
+        is True
+    )
+
+
+def test_is_chunk_non_empty_without_reasoning_details_stays_empty(
+    initialized_custom_stream_wrapper: CustomStreamWrapper,
+):
+    """The same chunk without reasoning_details carries nothing and stays empty."""
+    initialized_custom_stream_wrapper.sent_first_chunk = True
+
+    assert (
+        initialized_custom_stream_wrapper.is_chunk_non_empty(
+            completion_obj={"content": ""},
+            model_response=ModelResponseStream(),
+            response_obj={
+                "original_chunk": _openrouter_signature_chunk(
+                    with_reasoning_details=False
+                )
+            },
+        )
+        is False
+    )
