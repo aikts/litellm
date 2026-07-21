@@ -979,10 +979,35 @@ class CustomStreamWrapper:
                 and model_response.choices[0].delta.role is not None
             )
             or (getattr(model_response.choices[0].delta, "reasoning_items", None) is not None)
+            or self._has_reasoning_details(model_response=model_response, response_obj=response_obj)
         ):
             return True
         else:
             return False
+
+    @staticmethod
+    def _has_reasoning_details(model_response: ModelResponseStream, response_obj: dict[str, Any]) -> bool:
+        """
+        Check if a chunk carries OpenRouter `reasoning_details`.
+
+        OpenRouter sends the Anthropic thinking-block `signature` in a trailing
+        `reasoning_details` delta that has no content and no reasoning text. Treating
+        that chunk as empty drops the signature, so the client replays an unsigned
+        thinking block and Anthropic rejects the next turn with
+        `Invalid 'signature' in 'thinking' block`.
+        """
+        candidates: list[Any] = [model_response]
+        if isinstance(response_obj, dict):
+            candidates.append(response_obj.get("original_chunk"))
+
+        for candidate in candidates:
+            choices = getattr(candidate, "choices", None)
+            if not isinstance(choices, list):
+                continue
+            for choice in choices:
+                if getattr(getattr(choice, "delta", None), "reasoning_details", None):
+                    return True
+        return False
 
     def strip_role_from_delta(self, model_response: ModelResponseStream) -> ModelResponseStream:
         """
