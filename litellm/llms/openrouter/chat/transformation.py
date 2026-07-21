@@ -145,6 +145,57 @@ class OpenrouterConfig(OpenAIGPTConfig):
 
         return transformed_messages
 
+    @staticmethod
+    def _is_unsigned_anthropic_reasoning(model: str, detail: Any) -> bool:
+        """
+        Anthropic thinking blocks are only accepted back if they carry the original
+        `signature`. A `reasoning.text` entry without one cannot be verified.
+        """
+        if not isinstance(detail, dict) or detail.get("type") != "reasoning.text":
+            return False
+        if detail.get("signature"):
+            return False
+        reasoning_format = str(detail.get("format") or "")
+        return reasoning_format.startswith("anthropic") or "claude" in model.lower()
+
+    def _drop_unsigned_reasoning_details(
+        self, model: str, messages: List[AllMessageValues]
+    ) -> List[AllMessageValues]:
+        """
+        Drop replayed Anthropic reasoning blocks that lost their signature.
+
+        Clients echo back the `reasoning_details` they received. If the signature was
+        lost on the way to them, every follow-up request in that conversation fails with
+        `messages.N.content.0: Invalid 'signature' in 'thinking' block`. An unsignable
+        block carries no value for the provider, so it is dropped instead.
+        """
+        transformed_messages: List[AllMessageValues] = []
+        for message in messages:
+            reasoning_details = (
+                message.get("reasoning_details") if isinstance(message, dict) else None
+            )
+            if not isinstance(reasoning_details, list):
+                transformed_messages.append(message)
+                continue
+
+            signed_details = [
+                detail
+                for detail in reasoning_details
+                if not self._is_unsigned_anthropic_reasoning(model, detail)
+            ]
+            if len(signed_details) == len(reasoning_details):
+                transformed_messages.append(message)
+                continue
+
+            message_dict = {**message}
+            if signed_details:
+                message_dict["reasoning_details"] = signed_details
+            else:
+                message_dict.pop("reasoning_details", None)
+            transformed_messages.append(cast(AllMessageValues, message_dict))
+
+        return transformed_messages
+
     def transform_request(
         self,
         model: str,
@@ -159,6 +210,8 @@ class OpenrouterConfig(OpenAIGPTConfig):
         Returns:
             dict: The transformed request. Sent as the body of the API call.
         """
+        messages = self._drop_unsigned_reasoning_details(model, messages)
+
         if self._supports_cache_control_in_content(model):
             messages = self._move_cache_control_to_content(messages)
 

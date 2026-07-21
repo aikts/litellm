@@ -553,3 +553,90 @@ def test_openrouter_non_reasoning_models_do_not_add_reasoning_effort():
     )
 
     assert "reasoning_effort" not in supported_params
+
+
+def _reasoning_detail(**overrides):
+    detail = {
+        "type": "reasoning.text",
+        "text": "17 * 23 = 391",
+        "format": "anthropic-claude-v1",
+        "index": 0,
+    }
+    detail.update(overrides)
+    return detail
+
+
+def test_openrouter_transform_request_drops_unsigned_reasoning_details():
+    """
+    Anthropic rejects replayed thinking blocks without a signature. Entries that lost
+    their signature must be dropped instead of poisoning every follow-up request.
+    """
+    config = OpenrouterConfig()
+
+    messages = [
+        {"role": "user", "content": "17*23?"},
+        {
+            "role": "assistant",
+            "content": "391",
+            "reasoning_details": [_reasoning_detail(), _reasoning_detail(signature="")],
+        },
+        {"role": "user", "content": "18*23?"},
+    ]
+
+    transformed_request = config.transform_request(
+        model="openrouter/anthropic/claude-opus-4.6",
+        messages=messages,
+        optional_params={},
+        litellm_params={},
+        headers={},
+    )
+
+    assert "reasoning_details" not in transformed_request["messages"][1]
+    # original messages must not be mutated
+    assert len(messages[1]["reasoning_details"]) == 2
+
+
+def test_openrouter_transform_request_keeps_signed_reasoning_details():
+    """Signed thinking blocks must round-trip untouched."""
+    config = OpenrouterConfig()
+
+    signed = _reasoning_detail(signature="EpgCCokBCA8YAipA")
+    messages = [
+        {"role": "user", "content": "17*23?"},
+        {
+            "role": "assistant",
+            "content": "391",
+            "reasoning_details": [signed, _reasoning_detail(index=1)],
+        },
+    ]
+
+    transformed_request = config.transform_request(
+        model="openrouter/anthropic/claude-opus-4.6",
+        messages=messages,
+        optional_params={},
+        litellm_params={},
+        headers={},
+    )
+
+    assert transformed_request["messages"][1]["reasoning_details"] == [signed]
+
+
+def test_openrouter_transform_request_keeps_non_anthropic_reasoning_details():
+    """Providers that do not sign reasoning text are left alone."""
+    config = OpenrouterConfig()
+
+    unsigned = _reasoning_detail(format="openai-responses-v1")
+    messages = [
+        {"role": "user", "content": "17*23?"},
+        {"role": "assistant", "content": "391", "reasoning_details": [unsigned]},
+    ]
+
+    transformed_request = config.transform_request(
+        model="openrouter/deepseek/deepseek-v3.2",
+        messages=messages,
+        optional_params={},
+        litellm_params={},
+        headers={},
+    )
+
+    assert transformed_request["messages"][1]["reasoning_details"] == [unsigned]
