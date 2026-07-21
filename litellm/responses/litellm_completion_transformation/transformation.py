@@ -208,7 +208,10 @@ class LiteLLMCompletionResponsesConfig:
             "tool_choice": LiteLLMCompletionResponsesConfig._transform_tool_choice(
                 responses_api_request.get("tool_choice")
             ),
-            "tools": tools,
+            # `or None` so the None-drop below removes an empty list: some
+            # OpenAI-compatible upstreams (Cloud.ru, Yandex) reject `"tools": []`
+            # outright instead of treating it as "no tools".
+            "tools": tools or None,
             "top_p": responses_api_request.get("top_p"),
             "user": responses_api_request.get("user"),
             "temperature": responses_api_request.get("temperature"),
