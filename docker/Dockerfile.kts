@@ -25,7 +25,7 @@ USER root
 COPY --from=uvbin /uv /usr/local/bin/uv
 
 ARG EXTRA_INDEX_URL
-ARG AP_LITELLM_MODULES_VERSION=0.5.0
+ARG AP_LITELLM_MODULES_VERSION=0.6.0
 ARG UV_INDEX_STRATEGY=unsafe-best-match
 
 RUN apk add --no-cache curl ca-certificates && \
