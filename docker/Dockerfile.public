@@ -4,7 +4,7 @@
 # Python patches on top. No private dependencies — safe to publish to ghcr.io.
 #
 # Build args:
-#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.83.3-stable
+#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.89.5
 #
 # To patch a new file:
 #   1. Edit it in the source tree (litellm/<path>).
