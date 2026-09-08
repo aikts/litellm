@@ -4,7 +4,7 @@
 # Python patches on top. No private dependencies — safe to publish to ghcr.io.
 #
 # Build args:
-#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.83.3-stable
+#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.100.0
 #
 # To patch a new file:
 #   1. Edit it in the source tree (litellm/<path>).
@@ -28,15 +28,28 @@ COPY litellm/responses/litellm_completion_transformation/transformation.py /tmp/
 
 # Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
 # from) via sysconfig — NOT `import litellm` which can be shadowed by /app/litellm
-# when cwd is on sys.path. Then mirror the overlay into every existing copy
-# (site-packages + any /app/litellm source tree shipped by upstream) so it is
-# patched regardless of which one Python ends up resolving at runtime.
+# when cwd is on sys.path. Then mirror the overlay into every importable copy so
+# it is patched regardless of which one Python ends up resolving at runtime.
+#
+# /app is on sys.path because proxy_cli puts the working directory there, so a
+# litellm package under it has to be patched too. Upstream stopped shipping the
+# source tree in the runtime image in 1.100 and now leaves only a stub there
+# (litellm/proxy/prisma_migration.py, no __init__.py); that stub is never
+# imported as a package, so copying into it would be dead weight.
+#
+# The final loop is the safety net: the overlay copies files by name, so a
+# missing COPY above, a renamed upstream path or a moved install layout yields an
+# image that starts and serves traffic WITHOUT the patches, silently. Fail the
+# build instead of shipping that.
 RUN PURELIB="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
     TARGETS="$PURELIB/litellm" && \
-    [ -d /app/litellm ] && TARGETS="$TARGETS /app/litellm" || true && \
+    if [ -f /app/litellm/__init__.py ]; then TARGETS="$TARGETS /app/litellm"; fi && \
     for d in $TARGETS; do \
-      test -d "$d" && \
       cp -rv /tmp/overlay/litellm/. "$d/" && \
       find "$d" -name '__pycache__' -type d -exec rm -rf {} + ; \
+    done && \
+    for f in $(cd /tmp/overlay/litellm && find . -type f); do \
+      cmp -s "/tmp/overlay/litellm/$f" "$PURELIB/litellm/$f" || \
+        { echo "PATCH DID NOT LAND: litellm/$f"; exit 1; }; \
     done && \
     rm -rf /tmp/overlay
