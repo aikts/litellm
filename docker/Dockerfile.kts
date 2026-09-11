@@ -28,13 +28,17 @@ ARG EXTRA_INDEX_URL
 ARG AP_LITELLM_MODULES_VERSION=0.5.0
 ARG UV_INDEX_STRATEGY=unsafe-best-match
 
+# ap-litellm-modules pins litellm itself. Requiring the litellm version already in the
+# base image turns a drifted pin into a resolver error instead of uv silently replacing
+# litellm with a clean PyPI build and dropping the overlay patches.
 RUN apk add --no-cache curl ca-certificates && \
     mkdir -p /usr/local/share/ca-certificates/Yandex && \
     curl -fsSL "https://storage.yandexcloud.net/cloud-certs/CA.pem" \
         -o /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt && \
     chmod 0644 /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt && \
     update-ca-certificates && \
+    LITELLM_VERSION="$(/app/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("litellm"))')" && \
     uv pip install --python /app/.venv/bin/python --no-cache --no-config \
         --extra-index-url "${EXTRA_INDEX_URL}" \
-        "ap-litellm-modules==${AP_LITELLM_MODULES_VERSION}" && \
+        "ap-litellm-modules==${AP_LITELLM_MODULES_VERSION}" "litellm==${LITELLM_VERSION}" && \
     rm /usr/local/bin/uv
