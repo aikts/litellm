@@ -17,13 +17,19 @@ FROM ${BASE_IMAGE}
 USER root
 
 # ---- PATCHED FILES (add one COPY per patched file, keep the source path) ----
+COPY litellm/__init__.py /tmp/overlay/litellm/__init__.py
 COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
 COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
+COPY litellm/litellm_core_utils/litellm_logging.py /tmp/overlay/litellm/litellm_core_utils/litellm_logging.py
+COPY litellm/litellm_core_utils/llm_cost_calc/usage_object_transformation.py /tmp/overlay/litellm/litellm_core_utils/llm_cost_calc/usage_object_transformation.py
+COPY litellm/litellm_core_utils/llm_response_utils/response_metadata.py /tmp/overlay/litellm/litellm_core_utils/llm_response_utils/response_metadata.py
 COPY litellm/litellm_core_utils/streaming_handler.py /tmp/overlay/litellm/litellm_core_utils/streaming_handler.py
 COPY litellm/llms/openrouter/chat/transformation.py /tmp/overlay/litellm/llms/openrouter/chat/transformation.py
 COPY litellm/main.py /tmp/overlay/litellm/main.py
 COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py
+COPY litellm/responses/litellm_completion_transformation/streaming_iterator.py /tmp/overlay/litellm/responses/litellm_completion_transformation/streaming_iterator.py
 COPY litellm/responses/litellm_completion_transformation/transformation.py /tmp/overlay/litellm/responses/litellm_completion_transformation/transformation.py
+COPY litellm/responses/streaming_iterator.py /tmp/overlay/litellm/responses/streaming_iterator.py
 # ---- end patched files ----
 
 # Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
@@ -40,7 +46,9 @@ COPY litellm/responses/litellm_completion_transformation/transformation.py /tmp/
 # The final loop is the safety net: the overlay copies files by name, so a
 # missing COPY above, a renamed upstream path or a moved install layout yields an
 # image that starts and serves traffic WITHOUT the patches, silently. Fail the
-# build instead of shipping that.
+# build instead of shipping that. The import check catches the other half: a
+# patched file that needs a sibling patch which has no COPY line (v1.100.1-kts.3
+# shipped exactly that and every pod failed on `import litellm`).
 RUN PURELIB="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
     TARGETS="$PURELIB/litellm" && \
     if [ -f /app/litellm/__init__.py ]; then TARGETS="$TARGETS /app/litellm"; fi && \
@@ -52,4 +60,6 @@ RUN PURELIB="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib
       cmp -s "/tmp/overlay/litellm/$f" "$PURELIB/litellm/$f" || \
         { echo "PATCH DID NOT LAND: litellm/$f"; exit 1; }; \
     done && \
+    (cd / && python -c 'import litellm, litellm.proxy.proxy_server') && \
+    find "$PURELIB/litellm" -name '__pycache__' -type d -exec rm -rf {} + && \
     rm -rf /tmp/overlay
