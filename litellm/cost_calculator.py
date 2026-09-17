@@ -90,6 +90,7 @@ from litellm.llms.vertex_ai.cost_calculator import cost_router as google_cost_ro
 from litellm.llms.xai.cost_calculator import cost_per_token as xai_cost_per_token
 from litellm.responses.utils import ResponseAPILoggingUtils
 from litellm.types.agents import LiteLLMSendMessageResponse
+from litellm.types.llms.base import HiddenParams
 from litellm.types.llms.openai import (
     HttpxBinaryResponseContent,
     ImageGenerationRequestQuality,
@@ -186,6 +187,8 @@ _SEARCH_CALL_TYPES: Final = frozenset(
 
 _AREALTIME_CALL_TYPE: Final = CallTypes.arealtime.value
 _MCP_CALL_TYPE: Final = CallTypes.call_mcp_tool.value
+
+PROVIDER_RESPONSE_COST_HEADER: Final = "llm_provider-x-litellm-response-cost"
 
 
 def _cost_per_token_custom_pricing_helper(
@@ -1783,12 +1786,20 @@ def get_response_cost_from_hidden_params(
         _hidden_params_dict = hidden_params
 
     additional_headers: Final = _hidden_params_dict.get("additional_headers", {})
-    if additional_headers and "llm_provider-x-litellm-response-cost" in additional_headers:
-        response_cost: Final = additional_headers["llm_provider-x-litellm-response-cost"]
+    if additional_headers and PROVIDER_RESPONSE_COST_HEADER in additional_headers:
+        response_cost: Final = additional_headers[PROVIDER_RESPONSE_COST_HEADER]
         if response_cost is None:
             return None
-        return float(additional_headers["llm_provider-x-litellm-response-cost"])
+        return float(additional_headers[PROVIDER_RESPONSE_COST_HEADER])
     return None
+
+
+def _drop_provider_response_cost(hidden_params: dict[str, object] | HiddenParams) -> None:
+    # The proxy echoes additional_headers to the client and billing callbacks key off this header
+    additional_headers: Final = cast(Mapping[str, object], hidden_params["additional_headers"])
+    hidden_params["additional_headers"] = {
+        key: value for key, value in additional_headers.items() if key != PROVIDER_RESPONSE_COST_HEADER
+    }
 
 
 def response_cost_calculator(
@@ -1841,6 +1852,7 @@ def response_cost_calculator(
     data_residency: str | None = None,  # for OpenAI regional-processing uplift (e.g. "eu", "us")
     ### VERTEX LOCATION ###
     vertex_location: str | None = None,  # for Vertex AI regional-endpoint uplift (e.g. "us-east5", "global")
+    ignore_provider_reported_cost: bool = False,
 ) -> float:
     """
     Returns
@@ -1856,7 +1868,11 @@ def response_cost_calculator(
                     response_object._hidden_params["optional_params"] = optional_params
                     provider_response_cost: Final = get_response_cost_from_hidden_params(response_object._hidden_params)
                     if provider_response_cost is not None:
-                        return provider_response_cost
+                        if not ignore_provider_reported_cost:
+                            return provider_response_cost
+                        _drop_provider_response_cost(
+                            response_object._hidden_params  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownArgumentType]  # no public accessor
+                        )
 
             response_cost = completion_cost(
                 completion_response=response_object,

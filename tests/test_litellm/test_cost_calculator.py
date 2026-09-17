@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import litellm
 from litellm.cost_calculator import (
+    PROVIDER_RESPONSE_COST_HEADER,
     BaseTokenUsageProcessor,
     RealtimeAPITokenUsageProcessor,
     completion_cost,
@@ -144,6 +145,42 @@ def test_cost_calculator_with_response_cost_in_additional_headers():
     )
 
     assert result == 1000
+
+
+@pytest.mark.parametrize("ignore_provider_reported_cost", [True, False])
+def test_response_cost_calculator_ignores_provider_reported_cost_on_request(
+    _local_model_cost_map, ignore_provider_reported_cost: bool
+):
+    provider_cost = 1000.0
+    response = ModelResponse(
+        model="gpt-4o",
+        usage=Usage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
+    )
+    response._hidden_params["additional_headers"] = {
+        PROVIDER_RESPONSE_COST_HEADER: provider_cost,
+        "llm_provider-x-request-id": "req-1",
+    }
+    pricing = litellm.model_cost["gpt-4o"]
+    list_price_cost = 1000 * pricing["input_cost_per_token"] + 500 * pricing["output_cost_per_token"]
+
+    result = response_cost_calculator(
+        response_object=response,
+        model="gpt-4o",
+        custom_llm_provider="openai",
+        call_type="completion",
+        optional_params={},
+        custom_pricing=True,
+        ignore_provider_reported_cost=ignore_provider_reported_cost,
+    )
+
+    headers = response._hidden_params["additional_headers"]
+    assert headers["llm_provider-x-request-id"] == "req-1"
+    if ignore_provider_reported_cost:
+        assert result == pytest.approx(list_price_cost)
+        assert PROVIDER_RESPONSE_COST_HEADER not in headers
+    else:
+        assert result == provider_cost
+        assert headers[PROVIDER_RESPONSE_COST_HEADER] == provider_cost
 
 
 def test_baseten_model_api_pricing_entries(_local_model_cost_map):

@@ -8,8 +8,12 @@ through _hidden_params to the x-litellm-callback-duration-ms response header.
 import datetime
 from unittest.mock import MagicMock
 
+import pytest
+
+import litellm
 import litellm.litellm_core_utils.llm_response_utils.response_metadata as response_metadata_mod
 import litellm.proxy.common_request_processing as common_request_processing_mod
+from litellm.cost_calculator import PROVIDER_RESPONSE_COST_HEADER
 from litellm.litellm_core_utils.litellm_logging import Logging
 from litellm.litellm_core_utils.llm_response_utils.response_metadata import (
     ResponseMetadata,
@@ -17,7 +21,7 @@ from litellm.litellm_core_utils.llm_response_utils.response_metadata import (
 )
 from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing
-from litellm.types.utils import ModelResponse
+from litellm.types.utils import ModelResponse, Usage
 
 
 class TestCallbackDurationMs:
@@ -299,3 +303,57 @@ class TestLoggingInitCallbackDuration:
         # Should still be set (deep copy of None is essentially a no-op)
         assert hasattr(obj, "callback_duration_ms")
         assert obj.callback_duration_ms >= 0
+
+
+@pytest.mark.parametrize("prefer_custom_pricing", [True, False])
+def test_update_response_metadata_prices_usage_cost_from_deployment_when_preferred(
+    monkeypatch: pytest.MonkeyPatch, prefer_custom_pricing: bool
+):
+    provider_cost = 0.00025
+    deployment_id = "openrouter-claude-deployment"
+    deployment_pricing = {"input_cost_per_token": 0.001, "output_cost_per_token": 0.002}
+    deployment_cost = 10 * 0.001 + 5 * 0.002
+    monkeypatch.setattr(litellm, "prefer_custom_pricing_over_provider_cost", prefer_custom_pricing)
+    monkeypatch.setattr(
+        litellm,
+        "model_cost",
+        {
+            **litellm.model_cost,
+            deployment_id: {**deployment_pricing, "litellm_provider": "openrouter", "mode": "chat"},
+        },
+    )
+    logging_obj = Logging(
+        model="openrouter/claude",
+        messages=[{"role": "user", "content": "Hey"}],
+        stream=False,
+        call_type="completion",
+        start_time=datetime.datetime.now(),
+        litellm_call_id="call-1",
+        function_id="fn-1",
+    )
+    logging_obj.update_environment_variables(
+        model="openrouter/claude",
+        optional_params={},
+        litellm_params={"metadata": {"model_info": {"id": deployment_id, **deployment_pricing}}},
+        custom_llm_provider="openrouter",
+    )
+    result = ModelResponse(
+        model="openrouter/claude",
+        usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15, cost=provider_cost),
+    )
+    result._hidden_params["additional_headers"] = {PROVIDER_RESPONSE_COST_HEADER: provider_cost}
+
+    update_response_metadata(
+        result=result,
+        logging_obj=logging_obj,
+        model="openrouter/claude",
+        kwargs={"model_info": {"id": deployment_id}},
+        start_time=datetime.datetime(2025, 1, 1, 0, 0, 0),
+        end_time=datetime.datetime(2025, 1, 1, 0, 0, 1),
+    )
+
+    expected_cost = deployment_cost if prefer_custom_pricing else provider_cost
+    assert result._hidden_params["response_cost"] == pytest.approx(expected_cost)
+    assert result.usage.cost == pytest.approx(expected_cost)
+    headers = result._hidden_params["additional_headers"]
+    assert (PROVIDER_RESPONSE_COST_HEADER in headers) is not prefer_custom_pricing

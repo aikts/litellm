@@ -24,6 +24,7 @@ from litellm.exceptions import MidStreamFallbackError, RateLimitError
 from litellm.litellm_core_utils.asyncify import run_async_function
 from litellm.litellm_core_utils.core_helpers import process_response_headers
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
+from litellm.litellm_core_utils.llm_cost_calc.usage_object_transformation import price_usage_cost_from_deployment
 from litellm.litellm_core_utils.llm_response_utils.get_api_base import get_api_base
 from litellm.litellm_core_utils.llm_response_utils.response_metadata import (
     update_response_metadata,
@@ -381,6 +382,10 @@ class BaseResponsesAPIStreamingIterator:
                                 except Exception:
                                     # Best-effort usage cost annotation should not break stream replay.
                                     pass
+                    else:
+                        price_usage_cost_from_deployment(
+                            self.logging_obj, getattr(openai_responses_api_chunk, "response", None)
+                        )
 
                     if _chunk_type == openai_types.ResponsesAPIStreamEvents.RESPONSE_FAILED:
                         self._handle_logging_failed_response()
@@ -1232,6 +1237,8 @@ def _build_synthetic_response_events(
                     setattr(usage_obj, "cost", cost)
             except Exception:
                 pass
+    else:
+        price_usage_cost_from_deployment(logging_obj, transformed)
 
     events: Final[list[ResponsesAPIStreamingResponse]] = [
         _build_response_status_event(openai_types.ResponsesAPIStreamEvents.RESPONSE_CREATED, transformed),

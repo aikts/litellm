@@ -3873,6 +3873,63 @@ class TestBridgedOutputItemIdPrefixes:
         assert not suffix.startswith("-")
 
 
+@pytest.mark.parametrize("prefer_custom_pricing", [True, False])
+def test_completed_event_prices_usage_cost_from_deployment_when_preferred(monkeypatch, prefer_custom_pricing):
+    import time
+    from unittest.mock import Mock
+
+    import litellm
+    from litellm.litellm_core_utils.litellm_logging import Logging
+    from litellm.responses.litellm_completion_transformation.streaming_iterator import (
+        LiteLLMCompletionStreamingIterator,
+    )
+
+    provider_cost = 0.00025
+    deployment_id = "openrouter-claude-deployment"
+    deployment_pricing = {"input_cost_per_token": 0.001, "output_cost_per_token": 0.002}
+    monkeypatch.setattr(litellm, "prefer_custom_pricing_over_provider_cost", prefer_custom_pricing)
+    monkeypatch.setattr(
+        litellm,
+        "model_cost",
+        {**litellm.model_cost, deployment_id: {**deployment_pricing, "litellm_provider": "openrouter", "mode": "chat"}},
+    )
+    logging_obj = Logging(
+        model="openrouter/claude",
+        messages=[{"role": "user", "content": "Hey"}],
+        stream=True,
+        call_type="aresponses",
+        start_time=time.time(),
+        litellm_call_id="call-1",
+        function_id="fn-1",
+    )
+    logging_obj.update_environment_variables(
+        model="openrouter/claude",
+        optional_params={},
+        litellm_params={"litellm_metadata": {"model_info": {"id": deployment_id, **deployment_pricing}}},
+        custom_llm_provider="openrouter",
+    )
+    stream_wrapper = Mock(spec=litellm.CustomStreamWrapper)
+    stream_wrapper.logging_obj = logging_obj
+    iterator = LiteLLMCompletionStreamingIterator(
+        model="openrouter/claude",
+        litellm_custom_stream_wrapper=stream_wrapper,
+        request_input="Say the single word: apple",
+        responses_api_request={},
+        custom_llm_provider="openrouter",
+    )
+
+    completed_event = iterator._emit_response_completed_event(
+        _bridged_chat_completion_response(
+            model="openrouter/claude",
+            usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15, cost=provider_cost),
+        )
+    )
+
+    assert completed_event is not None
+    expected_cost = 10 * 0.001 + 5 * 0.002 if prefer_custom_pricing else provider_cost
+    assert completed_event.response.usage.cost == pytest.approx(expected_cost)
+
+
 class TestStreamingSnapshotItemIds:
     """The response.completed snapshot must reuse the streamed item ID (issue #27333).
 

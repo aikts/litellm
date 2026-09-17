@@ -18,6 +18,7 @@ from litellm.responses.streaming_iterator import (
     SyncResponsesAPIStreamingIterator,
 )
 from litellm.types.llms.openai import (
+    ResponseAPIUsage,
     ResponseCompletedEvent,
     ResponsesAPIResponse,
     ResponsesAPIStreamEvents,
@@ -305,3 +306,45 @@ def test_stream_cache_write_completes_when_asyncio_run_closes_the_loop(monkeypat
     asyncio.run(_short_lived_script())
 
     assert len(writes) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefer_custom_pricing", [True, False])
+async def test_completed_event_usage_cost_is_repriced_when_deployment_pricing_is_preferred(prefer_custom_pricing):
+    provider_cost = 0.00025
+    deployment_cost = 0.02
+    completed = ResponseCompletedEvent(
+        type=ResponsesAPIStreamEvents.RESPONSE_COMPLETED,
+        response=ResponsesAPIResponse(
+            id="resp_cost",
+            created_at=0,
+            output=[],
+            usage=ResponseAPIUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost=provider_cost),
+        ),
+    )
+    config = Mock(spec=BaseResponsesAPIConfig)
+    config.transform_streaming_response.side_effect = lambda model, parsed_chunk, logging_obj: (
+        completed if parsed_chunk.get("type") == "response.completed" else Mock(type=parsed_chunk.get("type"))
+    )
+    logging_obj = _logging_obj_stub()
+    logging_obj.provider_cost_is_overridden.return_value = prefer_custom_pricing
+    logging_obj._response_cost_calculator.return_value = deployment_cost
+
+    async def aiter_bytes():
+        for event in _COMPLETE_STREAM_EVENTS:
+            yield event
+
+    iterator = ResponsesAPIStreamingIterator(
+        response=Mock(headers={}, aiter_bytes=aiter_bytes),
+        model="openrouter/openai/gpt-4.1-nano",
+        responses_api_provider_config=config,
+        logging_obj=logging_obj,
+        litellm_metadata={},
+        custom_llm_provider="openrouter",
+    )
+
+    events = [event async for event in iterator]
+
+    assert completed in events
+    expected_cost = deployment_cost if prefer_custom_pricing else provider_cost
+    assert completed.response.usage.cost == expected_cost

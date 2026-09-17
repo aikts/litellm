@@ -1,8 +1,11 @@
 import datetime
 from typing import Any, Final
 
+from pydantic import BaseModel
+
 from litellm.constants import LITELLM_DETAILED_TIMING
 from litellm.litellm_core_utils.core_helpers import process_response_headers
+from litellm.litellm_core_utils.llm_cost_calc.usage_object_transformation import replace_usage_cost
 from litellm.litellm_core_utils.llm_response_utils.get_api_base import get_api_base
 from litellm.litellm_core_utils.logging_utils import LiteLLMLoggingObject
 from litellm.types.utils import (
@@ -37,13 +40,15 @@ class ResponseMetadata:
         ## ADD OTHER HIDDEN PARAMS
         model_info: Final = kwargs.get("model_info", {}) or {}
         model_id: Final = model_info.get("id", None)
+        # Computed before reading additional_headers: pricing may drop the provider-reported cost header
+        response_cost: Final = logging_obj._response_cost_calculator(
+            result=self.result, litellm_model_name=model, router_model_id=model_id
+        )
         new_params: Final = {
             "litellm_call_id": getattr(logging_obj, "litellm_call_id", None),
             "api_base": get_api_base(model=model or "", optional_params=kwargs),
             "model_id": model_id,
-            "response_cost": logging_obj._response_cost_calculator(
-                result=self.result, litellm_model_name=model, router_model_id=model_id
-            ),
+            "response_cost": response_cost,
             "additional_headers": process_response_headers(
                 self._get_value_from_hidden_params("additional_headers") or {},
                 preserve_litellm_internal_headers=True,
@@ -51,6 +56,15 @@ class ResponseMetadata:
             "litellm_model_name": model,
         }
         self._update_hidden_params(new_params)
+        self._apply_response_cost_to_usage(logging_obj, response_cost)
+
+    def _apply_response_cost_to_usage(self, logging_obj: LiteLLMLoggingObject, response_cost: float | None) -> None:
+        result: Final[object] = self.result  # pyright: ignore[reportAny]  # the wrapped response is untyped
+        usage: Final = getattr(result, "usage", None)
+        if not isinstance(usage, BaseModel) or getattr(usage, "cost", None) is None:
+            return
+        if logging_obj.provider_cost_is_overridden():
+            replace_usage_cost(usage, response_cost)
 
     def _update_hidden_params(self, new_params: dict) -> None:
         """

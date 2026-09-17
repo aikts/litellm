@@ -707,6 +707,12 @@ class Logging(LiteLLMLoggingBaseClass):
                 return model_id
         return None
 
+    def provider_cost_is_overridden(self) -> bool:
+        """Deployment pricing wins over a provider-reported cost such as OpenRouter's usage.cost."""
+        return litellm.prefer_custom_pricing_over_provider_cost and use_custom_pricing_for_model(
+            litellm_params=getattr(self, "litellm_params", None)
+        )
+
     def get_deployment_model_for_cost(self) -> str | None:
         """The provider-qualified model to price against.
 
@@ -1675,6 +1681,7 @@ class Logging(LiteLLMLoggingBaseClass):
                 "call_type": self.call_type,
                 "optional_params": self.optional_params,
                 "custom_pricing": custom_pricing,
+                "ignore_provider_reported_cost": self.provider_cost_is_overridden(),
                 "prompt": prompt,
                 "standard_built_in_tools_params": self.standard_built_in_tools_params,
                 "router_model_id": router_model_id,

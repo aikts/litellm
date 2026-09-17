@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any, Final, cast
 
 import litellm
+from litellm.litellm_core_utils.llm_cost_calc.usage_object_transformation import price_usage_cost_from_deployment
 from litellm.main import stream_chunk_builder
 from litellm.responses.litellm_completion_transformation.custom_tools import (
     build_tool_call_item_kwargs,
@@ -1173,6 +1174,8 @@ class LiteLLMCompletionStreamingIterator(ResponsesAPIStreamingIterator):
                         "cost",
                         self.litellm_logging_obj._response_cost_calculator(result=litellm_model_response),
                     )
+            else:
+                price_usage_cost_from_deployment(self.litellm_logging_obj, litellm_model_response)
 
             # Transform the response
             responses_api_response: Final = (

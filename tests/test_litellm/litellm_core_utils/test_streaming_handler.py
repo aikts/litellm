@@ -21,6 +21,7 @@ from litellm.litellm_core_utils.streaming_handler import (
 from litellm.types.utils import (
     CompletionTokensDetailsWrapper,
     Delta,
+    ModelResponse,
     ModelResponseStream,
     PromptTokensDetailsWrapper,
     StandardLoggingPayload,
@@ -1697,6 +1698,129 @@ async def test_openrouter_streaming_usage_only_chunk_without_stream_options():
     logged_kwargs = mock_success_event.call_args.kwargs["kwargs"]
     assert logged_kwargs["response_cost"] == 0.00025
     assert logged_kwargs["standard_logging_object"]["response_cost"] == 0.00025
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefer_custom_pricing", [True, False])
+async def test_openrouter_streaming_cost_uses_deployment_pricing_when_preferred(
+    monkeypatch: pytest.MonkeyPatch, prefer_custom_pricing: bool
+):
+    import time
+
+    from litellm.cost_calculator import PROVIDER_RESPONSE_COST_HEADER
+    from litellm.integrations.custom_logger import CustomLogger
+    from litellm.utils import ModelResponseListIterator
+
+    provider_cost = 0.00025
+    deployment_id = "openrouter-claude-deployment"
+    deployment_pricing = {"input_cost_per_token": 0.001, "output_cost_per_token": 0.002}
+    deployment_cost = 10 * 0.001 + 5 * 0.002
+    monkeypatch.setattr(litellm, "prefer_custom_pricing_over_provider_cost", prefer_custom_pricing)
+    monkeypatch.setattr(
+        litellm,
+        "model_cost",
+        {
+            **litellm.model_cost,
+            deployment_id: {**deployment_pricing, "litellm_provider": "openrouter", "mode": "chat"},
+        },
+    )
+
+    chunks = [
+        ModelResponseStream(
+            id="chatcmpl-or",
+            created=1742056047,
+            model="openrouter/claude",
+            choices=[StreamingChoices(finish_reason=None, index=0, delta=Delta(content="Hi", role="assistant"))],
+            usage=None,
+        ),
+        ModelResponseStream(
+            id="chatcmpl-or",
+            created=1742056048,
+            model="openrouter/claude",
+            choices=[StreamingChoices(finish_reason="stop", index=0, delta=Delta(content=""))],
+            usage=None,
+        ),
+        ModelResponseStream(
+            id="chatcmpl-or",
+            created=1742056049,
+            model="openrouter/claude",
+            choices=[],
+            usage=Usage(completion_tokens=5, prompt_tokens=10, total_tokens=15, cost=provider_cost),
+        ),
+    ]
+
+    class CaptureCallback(CustomLogger):
+        pass
+
+    callback = CaptureCallback()
+    monkeypatch.setattr(litellm, "success_callback", [callback])
+    monkeypatch.setattr(litellm, "_async_success_callback", [callback])
+
+    stream_logging_obj = Logging(
+        model="openrouter/claude",
+        messages=[{"role": "user", "content": "Hey"}],
+        stream=True,
+        call_type="acompletion",
+        start_time=time.time(),
+        litellm_call_id="12345",
+        function_id="1245",
+    )
+    stream_logging_obj.update_environment_variables(
+        model="openrouter/claude",
+        optional_params={},
+        litellm_params={"acompletion": True, "metadata": {"model_info": {"id": deployment_id, **deployment_pricing}}},
+        custom_llm_provider="openrouter",
+    )
+
+    response = CustomStreamWrapper(
+        completion_stream=ModelResponseListIterator(model_responses=chunks),
+        model="openrouter/claude",
+        custom_llm_provider="openrouter",
+        logging_obj=stream_logging_obj,
+        stream_options={"include_usage": True},
+    )
+
+    success_logged = asyncio.Event()
+    with patch.object(
+        callback,
+        "async_log_success_event",
+        new_callable=AsyncMock,
+        side_effect=lambda *args, **kwargs: success_logged.set(),
+    ) as mock_success_event:
+        collected_chunks = [chunk async for chunk in response]
+        await asyncio.wait_for(success_logged.wait(), timeout=30)
+
+    expected_cost = deployment_cost if prefer_custom_pricing else provider_cost
+    usage_chunks = [chunk for chunk in collected_chunks if getattr(chunk, "usage", None)]
+    assert usage_chunks[-1].usage.cost == pytest.approx(expected_cost)
+
+    logged_kwargs = mock_success_event.call_args.kwargs["kwargs"]
+    standard_logging_object = logged_kwargs["standard_logging_object"]
+    assert logged_kwargs["response_cost"] == pytest.approx(expected_cost)
+    assert standard_logging_object["response_cost"] == pytest.approx(expected_cost)
+    logged_headers = standard_logging_object["hidden_params"]["additional_headers"] or {}
+    assert (PROVIDER_RESPONSE_COST_HEADER in logged_headers) is not prefer_custom_pricing
+
+
+def test_stream_builder_skips_provider_cost_when_deployment_pricing_is_preferred(
+    monkeypatch: pytest.MonkeyPatch, logging_obj: Logging
+):
+    from litellm.main import _stream_builder_response_cost
+
+    logging_obj.update_environment_variables(
+        model="openrouter/claude",
+        optional_params={},
+        litellm_params={"metadata": {"model_info": {"input_cost_per_token": 0.001, "output_cost_per_token": 0.002}}},
+        custom_llm_provider="openrouter",
+    )
+    response = ModelResponse(
+        model="openrouter/claude",
+        usage=Usage(completion_tokens=5, prompt_tokens=10, total_tokens=15, cost=0.00025),
+    )
+
+    assert _stream_builder_response_cost(response, logging_obj) == 0.00025
+    monkeypatch.setattr(litellm, "prefer_custom_pricing_over_provider_cost", True)
+    assert _stream_builder_response_cost(response, logging_obj) is None
 
 
 def test_openrouter_streaming_cost_propagates_to_hidden_params():
