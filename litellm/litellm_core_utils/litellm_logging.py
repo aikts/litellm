@@ -99,6 +99,7 @@ from litellm.litellm_core_utils.core_helpers import (
     proxy_stamped_kubernetes_pod_routing,
     proxy_stamped_used_client_oauth_token,
     reconstruct_model_name,
+    remove_provider_response_cost,
     reports_native_messages_cost,
     require_attributes,
     set_response_cost_in_hidden_params,
@@ -2178,6 +2179,12 @@ class Logging(LiteLLMLoggingBaseClass):
             else response_result
         )
 
+        override_provider_cost: Final = self.provider_cost_is_overridden(result=priced_result)
+        if override_provider_cost:
+            remove_provider_response_cost(response=priced_result)
+            if priced_result is not result:
+                remove_provider_response_cost(response=result)
+
         result_hidden_params: Final = getattr(priced_result, HIDDEN_PARAMS_ATTR, None) or MappingProxyType({})
         if isinstance(priced_result, (BaseModel, HttpxBinaryResponseContent)) and hasattr(
             priced_result, "_hidden_params"
@@ -2211,6 +2218,13 @@ class Logging(LiteLLMLoggingBaseClass):
 
         ## RESPONSE COST ##
         custom_pricing: Final = self.custom_pricing_for(priced_result)
+        # Keep the previous provider-header precedence for deployments that have
+        # not opted into configured pricing.
+        use_provider_header: Final = (
+            custom_pricing
+            and not override_provider_cost
+            and get_response_cost_from_hidden_params(get_hidden_params_dict(priced_result)) is not None
+        )
 
         prompt: Final = self._prompt_for_cost_calculation()
 
@@ -2236,7 +2250,7 @@ class Logging(LiteLLMLoggingBaseClass):
                 "base_model": base_model,
                 "call_type": self.call_type,
                 "optional_params": self.optional_params,
-                "custom_pricing": custom_pricing,
+                "custom_pricing": custom_pricing and not use_provider_header,
                 "custom_cost_per_token": self.custom_cost_per_token if custom_pricing else None,
                 "custom_cost_per_second": self.custom_cost_per_second if custom_pricing else None,
                 "requested_model_info_override": self.custom_model_info if custom_pricing else None,
@@ -2446,6 +2460,9 @@ class Logging(LiteLLMLoggingBaseClass):
     def set_per_call_pricing(self, custom_model_info: ModelInfo | None) -> None:
         """Price this call from its own full price entry instead of ``litellm.model_cost``."""
         self.custom_model_info = custom_model_info
+
+    def provider_cost_is_overridden(self, result: object = None) -> bool:
+        return litellm.prefer_custom_pricing_over_provider_cost and self.custom_pricing_for(result=result)
 
     def custom_pricing_for(self, result: object) -> bool:
         if self.spilled_over_ptu_for(result):
@@ -5240,12 +5257,13 @@ class Logging(LiteLLMLoggingBaseClass):
         ):
             ## return unified Usage object
             if isinstance(result.response.usage, ResponseAPIUsage):
-                set_response_cost_in_hidden_params(
-                    result.response,
-                    provider_reported_usage_cost(
-                        result.response.usage, self.model_call_details.get("custom_llm_provider")
-                    ),
-                )
+                if not self.provider_cost_is_overridden(result=result.response):
+                    set_response_cost_in_hidden_params(
+                        result.response,
+                        provider_reported_usage_cost(
+                            result.response.usage, self.model_call_details.get("custom_llm_provider")
+                        ),
+                    )
                 transformed_usage: Final = ResponseAPILoggingUtils.transform_response_api_usage_to_chat_usage(
                     result.response.usage
                 )

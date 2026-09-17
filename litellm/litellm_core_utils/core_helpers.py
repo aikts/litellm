@@ -16,7 +16,7 @@ from typing_extensions import TypeIs  # noqa: TID251  # narrows a duck-typed val
 import litellm
 from litellm._logging import verbose_logger
 from litellm.constants import KUBERNETES_POD_ROUTING_KEY
-from litellm.litellm_core_utils.hidden_params import set_extra_attribute
+from litellm.litellm_core_utils.hidden_params import get_hidden_params, set_extra_attribute
 from litellm.litellm_core_utils.llm_response_utils.get_headers import get_provider_request_id
 from litellm.types.llms.openai import AllMessageValues, OpenAIChatCompletionFinishReason
 
@@ -1079,6 +1079,17 @@ def response_cost_in_hidden_params(response: _CarriesHiddenParams) -> float | No
     if not isinstance(additional_headers, Mapping):
         return None
     return finite_reported_cost(_USAGE_BLOCK_ADAPTER.validate_python(additional_headers).get(RESPONSE_COST_HEADER))
+
+
+def remove_provider_response_cost(response: object) -> None:
+    """Remove the provider cost marker used by callbacks and response headers."""
+    hidden_params: Final = get_hidden_params(response)
+    if hidden_params is None:
+        return
+    headers: Final = as_str_mapping(hidden_params.get("additional_headers"))
+    if headers is None or RESPONSE_COST_HEADER not in headers:
+        return
+    hidden_params["additional_headers"] = {key: value for key, value in headers.items() if key != RESPONSE_COST_HEADER}
 
 
 def override_stamped_response_cost(response: _CarriesHiddenParams, cost: float) -> None:
