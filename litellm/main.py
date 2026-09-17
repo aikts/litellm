@@ -8883,6 +8883,8 @@ def _reported_cost_is_priced_by_calculator(logging_obj: Optional["Logging"]) -> 
 
 
 def _stream_builder_response_cost(response: ModelResponse, logging_obj: Optional["Logging"]) -> float | None:
+    if logging_obj is not None and logging_obj.provider_cost_is_overridden():
+        return None
     usage_cost: Final = getattr(getattr(response, "usage", None), "cost", None)
     if isinstance(usage_cost, (int, float)) and not _reported_cost_is_priced_by_calculator(logging_obj):
         return float(usage_cost)

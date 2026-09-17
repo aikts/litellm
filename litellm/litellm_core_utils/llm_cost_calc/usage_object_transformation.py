@@ -1,6 +1,8 @@
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+from pydantic import BaseModel
 
 from litellm.types.utils import (
     CompletionTokensDetailsWrapper,
@@ -9,6 +11,9 @@ from litellm.types.utils import (
     TranscriptionUsageTokensObject,
     Usage,
 )
+
+if TYPE_CHECKING:
+    from litellm.litellm_core_utils.litellm_logging import Logging
 
 
 class TranscriptionUsageObjectTransformation:
@@ -164,3 +169,25 @@ class InteractionsUsageObjectTransformation:
             completion_tokens_details=completion_tokens_details,
             cache_read_input_tokens=total_cached_tokens or None,
         )
+
+
+def replace_usage_cost(usage: BaseModel, cost: float | None) -> None:
+    """Swap a provider-reported ``usage.cost`` for the deployment's own price, dropping it when there is none."""
+    if cost is not None:
+        setattr(usage, "cost", cost)
+        return
+    if hasattr(usage, "cost"):
+        delattr(usage, "cost")
+
+
+def price_usage_cost_from_deployment(logging_obj: "Logging | None", response: object) -> None:
+    """When deployment pricing is preferred, a provider-reported ``usage.cost`` shown to the caller is re-priced."""
+    usage: Final[object] = getattr(response, "usage", None)
+    if not isinstance(usage, BaseModel) or getattr(usage, "cost", None) is None:
+        return
+    if logging_obj is None or not logging_obj.provider_cost_is_overridden():
+        return
+    deployment_cost: Final = logging_obj._response_cost_calculator(  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]  # same pricing the success callback logs
+        result=response  # pyright: ignore[reportArgumentType]  # any response object carrying usage is priceable
+    )
+    replace_usage_cost(usage, deployment_cost)
