@@ -25,7 +25,7 @@ USER root
 COPY --from=uvbin /uv /usr/local/bin/uv
 
 ARG EXTRA_INDEX_URL
-ARG AP_LITELLM_MODULES_VERSION=0.7.1
+ARG AP_LITELLM_MODULES_VERSION=0.8.0
 ARG UV_INDEX_STRATEGY=unsafe-best-match
 
 # ap-litellm-modules pins litellm itself. Requiring the litellm version already in the
