@@ -20,6 +20,7 @@ import litellm
 from litellm import verbose_logger
 from litellm._uuid import uuid
 from litellm.litellm_core_utils.asyncify import asyncify
+from litellm.litellm_core_utils.llm_cost_calc.usage_object_transformation import price_usage_cost_from_deployment
 from litellm.litellm_core_utils.model_response_utils import (
     is_model_response_stream_empty,
 )
@@ -1786,6 +1787,12 @@ class CustomStreamWrapper:
                 response._hidden_params["additional_headers"] = {}
             response._hidden_params["additional_headers"]["llm_provider-x-litellm-response-cost"] = _cost
 
+    def _apply_provider_reported_cost(self, response: "ModelResponse") -> None:
+        if not self.logging_obj.provider_cost_is_overridden():
+            self._propagate_usage_cost_to_hidden_params(response, self.custom_llm_provider)
+            return
+        price_usage_cost_from_deployment(self.logging_obj, response)
+
     def __next__(self) -> "ModelResponseStream":
         cache_hit = False
         if self.custom_llm_provider is not None and self.custom_llm_provider == "cached_response":
@@ -1894,7 +1901,7 @@ class CustomStreamWrapper:
 
                 response = self.model_response_creator()
                 if complete_streaming_response is not None:
-                    self._propagate_usage_cost_to_hidden_params(complete_streaming_response, self.custom_llm_provider)
+                    self._apply_provider_reported_cost(complete_streaming_response)
 
                     setattr(
                         response,
@@ -2145,7 +2152,7 @@ class CustomStreamWrapper:
 
             response: Final = self.model_response_creator()
             if complete_streaming_response is not None:
-                self._propagate_usage_cost_to_hidden_params(complete_streaming_response, self.custom_llm_provider)
+                self._apply_provider_reported_cost(complete_streaming_response)
 
                 setattr(
                     response,
