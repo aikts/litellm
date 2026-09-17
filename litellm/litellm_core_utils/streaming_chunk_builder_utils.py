@@ -19,6 +19,7 @@ from litellm.litellm_core_utils.core_helpers import (
     chunk_usage,
     finite_cost,
     provider_reported_usage_cost,
+    set_response_cost_in_hidden_params,
     stamp_litellm_bill_on_usage,
 )
 from litellm.litellm_core_utils.hidden_params import (
@@ -1433,6 +1434,8 @@ def _stream_builder_response_cost(
     response: ModelResponse, logging_obj: Optional["Logging"], chunks: Sequence[object]
 ) -> float | None:
     if _logged_provider(logging_obj) == LlmProviders.OPENCODE_GO.value:
+        if logging_obj is not None and logging_obj.provider_cost_is_overridden(result=response):
+            return None
         # usage.opencode only survives on the chunks, the assembled Usage keeps declared fields
         reported: Final = (
             provider_reported_usage_cost(chunk_usage(chunk), LlmProviders.OPENCODE_GO.value)
@@ -1493,12 +1496,21 @@ def _carry_upstream_usage_cost(response: ModelResponse, chunks: Sequence[object]
 def _stamp_streaming_usage_cost(usage: Usage, response: ModelResponse, logging_obj: Optional["Logging"]) -> None:
     if logging_obj is None:
         return
-    if _logged_provider(logging_obj) in PROVIDERS_BILLED_FROM_THEIR_OWN_USAGE_FIELDS and (
-        finite_cost(getattr(usage, "cost", None)) is not None
+    override_provider_cost: Final = logging_obj.provider_cost_is_overridden(result=response)
+    if (
+        not override_provider_cost
+        and _logged_provider(logging_obj) in PROVIDERS_BILLED_FROM_THEIR_OWN_USAGE_FIELDS
+        and finite_cost(getattr(usage, "cost", None)) is not None
     ):
         return
+    if not override_provider_cost and _logged_provider(logging_obj) == LlmProviders.OPENROUTER.value:
+        set_response_cost_in_hidden_params(
+            response=response, cost=provider_reported_usage_cost(usage, LlmProviders.OPENROUTER.value)
+        )
     computed_cost: Final = logging_obj.response_cost_calculator(result=response)
     if isinstance(computed_cost, bool) or not isinstance(computed_cost, (int, float)) or computed_cost < 0:
+        if override_provider_cost and getattr(usage, "cost", None) is not None:
+            delattr(usage, "cost")
         return
     if computed_cost > 0 or isinstance(getattr(usage, "cost", None), (int, float)):
         stamp_litellm_bill_on_usage(response, usage, float(computed_cost))

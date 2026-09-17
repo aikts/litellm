@@ -2447,9 +2447,10 @@ class CustomStreamWrapper:
                 complete_streaming_response: Final = self._build_complete_streaming_response()
                 response = self._new_usage_chunk()
                 if complete_streaming_response is not None:
-                    self._propagate_usage_cost_to_hidden_params(
-                        complete_streaming_response, self.custom_llm_provider, self.chunks
-                    )
+                    if not self.logging_obj.provider_cost_is_overridden(result=complete_streaming_response):
+                        self._propagate_usage_cost_to_hidden_params(
+                            complete_streaming_response, self.custom_llm_provider, self.chunks
+                        )
 
                     setattr(
                         response,
@@ -2671,9 +2672,10 @@ class CustomStreamWrapper:
             complete_streaming_response: Final = await self._async_build_complete_streaming_response()
             response: Final = self._new_usage_chunk()
             if complete_streaming_response is not None:
-                self._propagate_usage_cost_to_hidden_params(
-                    complete_streaming_response, self.custom_llm_provider, self.chunks
-                )
+                if not self.logging_obj.provider_cost_is_overridden(result=complete_streaming_response):
+                    self._propagate_usage_cost_to_hidden_params(
+                        complete_streaming_response, self.custom_llm_provider, self.chunks
+                    )
 
                 setattr(
                     response,

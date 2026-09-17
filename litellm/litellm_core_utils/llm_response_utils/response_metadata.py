@@ -4,10 +4,14 @@ from functools import reduce
 from typing import Final
 
 import httpx
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from litellm.constants import LITELLM_DETAILED_TIMING
-from litellm.litellm_core_utils.core_helpers import get_litellm_metadata_from_kwargs, process_response_headers
+from litellm.litellm_core_utils.core_helpers import (
+    get_litellm_metadata_from_kwargs,
+    process_response_headers,
+    stamp_litellm_bill_on_usage,
+)
 from litellm.litellm_core_utils.llm_response_utils.get_api_base import get_api_base
 from litellm.litellm_core_utils.logging_utils import LiteLLMLoggingObject
 from litellm.types.utils import (
@@ -168,16 +172,17 @@ class ResponseMetadata:
         ## ADD OTHER HIDDEN PARAMS
         model_info: Final = kwargs.get("model_info", {}) or {}
         model_id: Final = model_info.get("id", None)
+        response_cost: Final = logging_obj.response_cost_calculator(
+            result=self.result,
+            litellm_model_name=model,
+            router_model_id=model_id,
+            cache_hit=cache_hit,
+        )
         new_params: Final = {
             "litellm_call_id": getattr(logging_obj, "litellm_call_id", None),
             "api_base": get_api_base(model=model or "", optional_params=kwargs),
             "model_id": model_id,
-            "response_cost": logging_obj.response_cost_calculator(
-                result=self.result,
-                litellm_model_name=model,
-                router_model_id=model_id,
-                cache_hit=cache_hit,
-            ),
+            "response_cost": response_cost,
             "additional_headers": process_response_headers(
                 self._get_additional_headers_from_hidden_params() or {},
                 preserve_litellm_internal_headers=True,
@@ -187,6 +192,16 @@ class ResponseMetadata:
             or _provider_response_model(self.result),
         }
         self._update_hidden_params(new_params)
+        usage: Final[object] = getattr(self.result, "usage", None)
+        if (
+            isinstance(usage, BaseModel)
+            and getattr(usage, "cost", None) is not None
+            and logging_obj.provider_cost_is_overridden(result=self.result)
+        ):
+            if response_cost is None:
+                delattr(usage, "cost")
+            else:
+                stamp_litellm_bill_on_usage(response=self.result, usage=usage, bill=response_cost)
 
     def _update_hidden_params(self, new_params: Mapping[str, object]) -> None:
         """
