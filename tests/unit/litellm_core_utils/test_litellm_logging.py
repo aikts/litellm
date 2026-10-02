@@ -342,6 +342,55 @@ def test_pre_call_tolerates_missing_api_base(logging_obj):
     logging_obj.pre_call(input="", api_key="", additional_args={"api_base": None, "headers": {}})
 
     assert logging_obj.model_call_details["litellm_params"]["api_base"] == ""
+@pytest.mark.parametrize("prefer", [False, True])
+def test_deployment_cost_preference_uses_registered_model_info(prefer: bool):
+    """Client metadata cannot enable or disable a deployment's fixed tariff."""
+    router = litellm.Router(
+        model_list=[
+            {
+                "model_name": "fixed-price-test",
+                "litellm_params": {"model": "openai/gpt-6-luna", "api_key": "test"},
+                "model_info": {
+                    "id": "fixed-price-deployment",
+                    "input_cost_per_token": 1e-6,
+                    "output_cost_per_token": 2e-6,
+                    "prefer_custom_pricing_over_provider_cost": prefer,
+                },
+            }
+        ]
+    )
+    try:
+        logging = LitellmLogging(
+            model="gpt-6-luna",
+            messages=[],
+            stream=False,
+            call_type="completion",
+            start_time=time.time(),
+            litellm_call_id="fixed-price-call",
+            function_id="fixed-price-function",
+        )
+        logging.update_environment_variables(
+            litellm_params={
+                "metadata": {
+                    "model_info": {
+                        "id": "fixed-price-deployment",
+                        "prefer_custom_pricing_over_provider_cost": not prefer,
+                        "input_cost_per_token": 1e-6,
+                        "output_cost_per_token": 2e-6,
+                    }
+                }
+            },
+            optional_params={},
+            custom_llm_provider="openai",
+        )
+        response = ModelResponse(model="gpt-6-luna", usage={"prompt_tokens": 10, "completion_tokens": 4, "cost": 999})
+        response._hidden_params["additional_headers"] = {"llm_provider-x-litellm-response-cost": "0.333"}
+        assert logging.provider_cost_is_overridden() is prefer
+        assert logging._response_cost_calculator(response, router_model_id="fixed-price-deployment") == pytest.approx(
+            18e-6 if prefer else 0.333
+        )
+    finally:
+        router.reset()
 
 
 def test_post_call_serializes_dict_with_datetime(logging_obj):
