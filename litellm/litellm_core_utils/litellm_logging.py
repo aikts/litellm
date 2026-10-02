@@ -2462,7 +2462,13 @@ class Logging(LiteLLMLoggingBaseClass):
         self.custom_model_info = custom_model_info
 
     def provider_cost_is_overridden(self, result: object = None) -> bool:
-        return litellm.prefer_custom_pricing_over_provider_cost and self.custom_pricing_for(result=result)
+        registered: Final = litellm.model_cost.get(self.get_router_model_id() or "")
+        deployment_prefers: Final = (
+            isinstance(registered, dict) and registered.get("prefer_custom_pricing_over_provider_cost") is True
+        )
+        return (
+            litellm.prefer_custom_pricing_over_provider_cost or deployment_prefers
+        ) and self.custom_pricing_for(result=result)
 
     def custom_pricing_for(self, result: object) -> bool:
         if self.spilled_over_ptu_for(result):

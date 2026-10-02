@@ -29,6 +29,7 @@ COPY litellm/llms/openrouter/chat/transformation.py /tmp/overlay/litellm/llms/op
 COPY litellm/main.py /tmp/overlay/litellm/main.py
 COPY litellm/proxy/_lazy_features.py /tmp/overlay/litellm/proxy/_lazy_features.py
 COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py
+COPY litellm/types/utils.py /tmp/overlay/litellm/types/utils.py
 # ---- end patched files ----
 
 # Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
