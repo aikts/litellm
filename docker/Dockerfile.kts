@@ -31,13 +31,25 @@ ARG UV_INDEX_STRATEGY=unsafe-best-match
 # ap-litellm-modules pins litellm itself. Requiring the litellm version already in the
 # base image turns a drifted pin into a resolver error instead of uv silently replacing
 # litellm with a clean PyPI build and dropping the overlay patches.
-RUN apk add --no-cache curl ca-certificates && \
-    mkdir -p /usr/local/share/ca-certificates/Yandex && \
-    curl -fsSL "https://storage.yandexcloud.net/cloud-certs/CA.pem" \
-        -o /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt && \
-    chmod 0644 /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt && \
-    update-ca-certificates && \
-    LITELLM_VERSION="$(/app/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("litellm"))')" && \
+RUN /app/.venv/bin/python - <<'PYCA'
+import hashlib
+import ssl
+import urllib.request
+from pathlib import Path
+
+with urllib.request.urlopen("https://storage.yandexcloud.net/cloud-certs/CA.pem", timeout=30) as response:
+    certificate = response.read()
+if hashlib.sha256(certificate).hexdigest() != "6d148f85b5213445b23ad22ff45e47e1aa2be968f183f9bd6ff39de54d47a8ef":
+    raise SystemExit("Yandex root CA checksum mismatch")
+bundle = Path("/etc/ssl/certs/ca-certificates.crt")
+trusted_roots = Path(ssl.get_default_verify_paths().cafile).read_bytes()
+bundle.parent.mkdir(parents=True, exist_ok=True)
+bundle.write_bytes(trusted_roots + b"\n" + certificate)
+PYCA
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+RUN LITELLM_VERSION="$(/app/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("litellm"))')" && \
     uv pip install --python /app/.venv/bin/python --no-cache --no-config \
         --extra-index-url "${EXTRA_INDEX_URL}" \
         "ap-litellm-modules==${AP_LITELLM_MODULES_VERSION}" "litellm==${LITELLM_VERSION}" && \
