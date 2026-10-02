@@ -21,6 +21,7 @@ COPY litellm/__init__.py /tmp/overlay/litellm/__init__.py
 COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py
 COPY litellm/images/main.py /tmp/overlay/litellm/images/main.py
 COPY litellm/litellm_core_utils/litellm_logging.py /tmp/overlay/litellm/litellm_core_utils/litellm_logging.py
+COPY litellm/types/utils.py /tmp/overlay/litellm/types/utils.py
 COPY litellm/litellm_core_utils/llm_cost_calc/usage_object_transformation.py /tmp/overlay/litellm/litellm_core_utils/llm_cost_calc/usage_object_transformation.py
 COPY litellm/litellm_core_utils/llm_response_utils/response_metadata.py /tmp/overlay/litellm/litellm_core_utils/llm_response_utils/response_metadata.py
 COPY litellm/litellm_core_utils/streaming_handler.py /tmp/overlay/litellm/litellm_core_utils/streaming_handler.py

@@ -709,9 +709,17 @@ class Logging(LiteLLMLoggingBaseClass):
 
     def provider_cost_is_overridden(self) -> bool:
         """Deployment pricing wins over a provider-reported cost such as OpenRouter's usage.cost."""
-        return litellm.prefer_custom_pricing_over_provider_cost and use_custom_pricing_for_model(
-            litellm_params=getattr(self, "litellm_params", None)
+        cost_map: Final = cast(  # cast-ok: router registry entries are model metadata
+            Mapping[str, ModelInfo],
+            litellm.model_cost,  # pyright: ignore[reportUnknownMemberType]  # untyped global registry
         )
+        registered: Final = cost_map.get(self.get_router_model_id() or "")
+        deployment_prefers: Final = (
+            isinstance(registered, dict) and registered.get("prefer_custom_pricing_over_provider_cost") is True
+        )
+        return (
+            litellm.prefer_custom_pricing_over_provider_cost or deployment_prefers
+        ) and use_custom_pricing_for_model(litellm_params=getattr(self, "litellm_params", None))
 
     def get_deployment_model_for_cost(self) -> str | None:
         """The provider-qualified model to price against.
