@@ -268,6 +268,7 @@ class OffPeakPricing(TypedDict, total=False):
 
 
 class ModelInfoBase(ProviderSpecificModelInfo, total=False):
+    prefer_custom_pricing_over_provider_cost: ReadOnly[bool]
     key: Required[str]  # the key in litellm.model_cost which is returned
 
     max_tokens: Required[int | None]
