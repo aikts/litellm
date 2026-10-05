@@ -41,6 +41,9 @@ with urllib.request.urlopen("https://storage.yandexcloud.net/cloud-certs/CA.pem"
     certificate = response.read()
 if hashlib.sha256(certificate).hexdigest() != "6d148f85b5213445b23ad22ff45e47e1aa2be968f183f9bd6ff39de54d47a8ef":
     raise SystemExit("Yandex root CA checksum mismatch")
+certificate_path = Path("/usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt")
+certificate_path.parent.mkdir(parents=True, exist_ok=True)
+certificate_path.write_bytes(certificate)
 bundle = Path("/etc/ssl/certs/ca-certificates.crt")
 trusted_roots = Path(ssl.get_default_verify_paths().cafile).read_bytes()
 bundle.parent.mkdir(parents=True, exist_ok=True)
@@ -54,3 +57,25 @@ RUN LITELLM_VERSION="$(/app/.venv/bin/python -c 'import importlib.metadata as m;
         --extra-index-url "${EXTRA_INDEX_URL}" \
         "ap-litellm-modules==${AP_LITELLM_MODULES_VERSION}" "litellm==${LITELLM_VERSION}" && \
     rm /usr/local/bin/uv
+
+RUN KAFKA_BILLING_ENABLED=true \
+    KAFKA_BILLING_BROKERS=localhost:9093 \
+    KAFKA_BILLING_SECURITY_PROTOCOL=SASL_SSL \
+    KAFKA_BILLING_SSL_CAFILE=/usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt \
+    /app/.venv/bin/python - <<'PYSSL'
+import asyncio
+import ssl
+
+from ap_litellm.billing.kafka_logger import KafkaBillingLogger
+
+async def verify_kafka_ssl():
+    context = KafkaBillingLogger()._build_ssl_context()
+    assert isinstance(context, ssl.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+    assert context.cert_store_stats()["x509_ca"] > 0
+    assert ssl.create_default_context().cert_store_stats()["x509_ca"] > 0
+    print("Kafka billing SSL context verified")
+
+asyncio.run(verify_kafka_ssl())
+PYSSL
