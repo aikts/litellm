@@ -9,7 +9,7 @@
 #
 # Build args:
 #   BASE_IMAGE                   - public overlay image (output of Dockerfile.public),
-#                                  e.g. ghcr.io/aikts/litellm-database:v1.100.1
+#                                  e.g. ghcr.io/aikts/litellm-database:v1.104.0
 #   EXTRA_INDEX_URL              - private PyPI index URL
 #   AP_LITELLM_MODULES_VERSION   - pinned version of ap-litellm-modules to install
 
@@ -25,7 +25,7 @@ USER root
 COPY --from=uvbin /uv /usr/local/bin/uv
 
 ARG EXTRA_INDEX_URL
-ARG AP_LITELLM_MODULES_VERSION=0.10.0
+ARG AP_LITELLM_MODULES_VERSION=0.11.0
 ARG UV_INDEX_STRATEGY=unsafe-best-match
 
 # ap-litellm-modules pins litellm itself. Requiring the litellm version already in the
