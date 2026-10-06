@@ -27,6 +27,9 @@ from litellm.exceptions import MidStreamFallbackError, RateLimitError
 from litellm.litellm_core_utils.asyncify import run_async_function
 from litellm.litellm_core_utils.core_helpers import process_response_headers
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
+from litellm.litellm_core_utils.llm_cost_calc.usage_object_transformation import (
+    price_usage_cost_from_deployment,
+)
 from litellm.litellm_core_utils.llm_response_utils.get_api_base import get_api_base
 from litellm.litellm_core_utils.llm_response_utils.response_metadata import (
     update_response_metadata,
@@ -1462,6 +1465,7 @@ def _stamp_responses_usage_cost(
     if usage_obj is None:
         return
     response_obj.usage = usage_obj  # rebind-ok: the stamped cost has to ride on the response the client receives
+    price_usage_cost_from_deployment(logging_obj, response_obj)
     if isinstance(getattr(usage_obj, "cost", None), (int, float)):
         return
     try:
