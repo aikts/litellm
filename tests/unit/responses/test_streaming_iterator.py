@@ -455,6 +455,7 @@ def test_stamp_responses_usage_cost_keeps_provider_reported_cost():
     response = _responses_api_response_with_usage()
     setattr(response.usage, "cost", 0.5)
     logging_obj = Mock(spec=LiteLLMLoggingObj)
+    logging_obj.provider_cost_is_overridden.return_value = False
 
     _stamp_responses_usage_cost(response, logging_obj)
 
@@ -487,6 +488,7 @@ def test_stamp_responses_usage_cost_keeps_provider_cost_from_dict_usage():
         }
     )
     logging_obj = Mock(spec=LiteLLMLoggingObj)
+    logging_obj.provider_cost_is_overridden.return_value = False
 
     _stamp_responses_usage_cost(response, logging_obj)
 
