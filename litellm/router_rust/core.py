@@ -4481,6 +4481,7 @@ class _Driver:
         # The open ``route {model_group}`` phase span of the pick in progress (async calls only).
         self._route_phase: contextlib.ExitStack | None = None
         self._route_model: str = ""
+        self._affinity_failover: tuple[object, tuple[str, ...]] | None = None
         self._walk: Final = WalkMetadata(
             request, plan.metadata_field, partial(_params_base_model, core), live=fresh and not plan.single_attempt
         )
@@ -4953,6 +4954,20 @@ class _Driver:
         # The walk's metadata for the attempt's level (retries, fallback hops) and its hop kwargs.
         call.kwargs = self._walk.stamp(step, shaped, deployment) if self._plan.stamps_walk else shaped
         field: Final = self._plan.metadata_field
+        affinity_failover: Final = self._affinity_failover
+        if (
+            affinity_failover is not None
+            and isinstance(level, int)
+            and level > 0
+            and affinity_failover[0] == step.get("model_group")
+        ):
+            # The native selection step carries the weighted exclusions. Pass
+            # them to the deployment hook so it can replace an obsolete pin.
+            metadata: Final = as_str_mapping(call.kwargs.get(field)) or {}
+            call.kwargs = {
+                **call.kwargs,
+                field: {**metadata, "_failover_excluded_ids": list(affinity_failover[1])},
+            }
         if isinstance(call.served, dict) and field in call.kwargs:
             call.served[field] = call.kwargs[field]
         self._served = (requested, call.served)
@@ -5399,6 +5414,15 @@ class _Driver:
         request: Final = self._request
         messages, input = self._plan.pick_input(request)
         if step.get("stage") == "callback_filters":
+            configured_exclusions: Final = frozenset(
+                value for value in _as_list(request.get("_excluded_deployment_ids")) if isinstance(value, str)
+            )
+            excluded: Final = tuple(
+                value
+                for value in _as_list(step.get("excluded_ids"))
+                if isinstance(value, str) and value not in configured_exclusions
+            )
+            self._affinity_failover = (step.get("model_group"), excluded) if excluded else None
             answer, error = await self._core._answer_callback_filters(step, request, messages)  # pyright: ignore[reportPrivateUsage]  # the driver serves its own core
             if isinstance(error, Exception):
                 # The try failed with the filter's error: the level raises it if nothing else serves.

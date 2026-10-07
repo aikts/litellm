@@ -9,21 +9,22 @@ cross-group fallback runs.
 
 from collections import Counter
 from typing import Final, Optional
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 import litellm
 from litellm import Router
+from litellm.router_utils.pre_call_checks.deployment_affinity_check import DeploymentAffinityCheck
 from litellm.types.router import Deployment, LiteLLM_Params, ModelInfo
 from litellm.utils import get_excluded_filtered_deployments
-
 
 # ---------------------------------------------------------------------------
 # Unit tests for get_excluded_filtered_deployments
 # ---------------------------------------------------------------------------
 
 
-def _make_dep(dep_id: str, weight: Optional[int] = None) -> dict:
+def _make_dep(dep_id: str, weight: int | None = None) -> dict:
     params: dict = {"model": "gpt-4o", "api_key": "key"}
     if weight is not None:
         params["weight"] = weight
@@ -153,6 +154,51 @@ async def test_failover_lands_on_other_deployment_when_flag_on():
         messages=[{"role": "user", "content": "hi"}],
     )
     assert response._hidden_params["model_id"] == "B"
+
+
+@pytest.mark.asyncio
+async def test_failover_bypasses_and_replaces_deployment_affinity_pin():
+    model_group = "test-model"
+    user_key = "sticky-user-key"
+    router = Router(
+        model_list=[
+            {
+                "model_name": model_group,
+                "litellm_params": {
+                    "model": "gpt-4o",
+                    "api_key": "bad",
+                    "mock_response": Exception("pinned deployment down"),
+                    "weight": 1,
+                },
+                "model_info": {"id": "A"},
+            },
+            {
+                "model_name": model_group,
+                "litellm_params": {
+                    "model": "gpt-4o",
+                    "api_key": "good",
+                    "mock_response": "ok from B",
+                    "weight": 0,
+                },
+                "model_info": {"id": "B"},
+            },
+        ],
+        routing_strategy="simple-shuffle",
+        num_retries=0,
+        enable_weighted_failover=True,
+        model_group_affinity_config={model_group: ["deployment_affinity"]},
+    )
+    cache_key = DeploymentAffinityCheck.get_affinity_cache_key(model_group=model_group, user_key=user_key)
+    await router.cache.async_set_cache(cache_key, {"model_id": "A"}, ttl=3600)
+
+    response = await router.acompletion(
+        model=model_group,
+        messages=[{"role": "user", "content": "hi"}],
+        metadata={"user_api_key_hash": user_key},
+    )
+
+    assert response._hidden_params["model_id"] == "B"
+    assert await router.cache.async_get_cache(key=cache_key) == {"model_id": "B"}
 
 
 @pytest.mark.asyncio
@@ -547,7 +593,7 @@ async def test_failover_reaches_healthy_sibling_when_affinity_pins_failed_deploy
 
     assert while_a_is_down._hidden_params["model_id"] == "B"
     assert while_a_is_down._hidden_params["additional_headers"]["x-litellm-attempted-fallbacks"] == 1
-    assert after_a_recovers._hidden_params["model_id"] == "A"
+    assert after_a_recovers._hidden_params["model_id"] == "B"
 
 
 def _two_deployment_router(model: str) -> Router:
