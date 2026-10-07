@@ -613,6 +613,75 @@ async def test_async_filter_deployments_falls_back_when_cached_deployment_is_unh
 
 
 @pytest.mark.asyncio
+async def test_async_filter_deployments_does_not_restore_weighted_failover_exclusion():
+    user_key = "user-key-weighted-failover"
+    stable_model_map_key = "anthropic/claude-opus-4.6"
+    cache = AsyncMock()
+    cache.async_get_cache = AsyncMock(return_value={"model_id": "bedrock-deployment"})
+    callback = DeploymentAffinityCheck(
+        cache=cache,
+        ttl_seconds=3600,
+        enable_user_key_affinity=True,
+        enable_responses_api_affinity=True,
+    )
+    healthy_deployments = [
+        {
+            "model_name": stable_model_map_key,
+            "litellm_params": {"model": "bedrock/converse/eu.anthropic.claude-opus-4-6-v1"},
+            "model_info": {"id": "bedrock-deployment"},
+        },
+        {
+            "model_name": stable_model_map_key,
+            "litellm_params": {"model": "openrouter/anthropic/claude-opus-4.6"},
+            "model_info": {"id": "openrouter-deployment"},
+        },
+    ]
+    request_kwargs = {
+        "_excluded_deployment_ids": ["bedrock-deployment"],
+        "metadata": {"user_api_key_hash": user_key},
+    }
+
+    filtered = await callback.async_filter_deployments(
+        model=stable_model_map_key,
+        healthy_deployments=healthy_deployments,
+        messages=None,
+        request_kwargs=request_kwargs,
+        parent_otel_span=None,
+    )
+
+    assert filtered == healthy_deployments
+    assert request_kwargs["_excluded_deployment_ids"] == ["bedrock-deployment"]
+
+
+@pytest.mark.asyncio
+async def test_async_pre_call_hook_replaces_pin_after_weighted_failover():
+    user_key = "user-key-weighted-failover"
+    model_group = "anthropic/claude-opus-4.6"
+    callback = DeploymentAffinityCheck(
+        cache=DualCache(),
+        ttl_seconds=3600,
+        enable_user_key_affinity=True,
+        enable_responses_api_affinity=True,
+    )
+    cache_key = DeploymentAffinityCheck.get_affinity_cache_key(model_group=model_group, user_key=user_key)
+    await callback.cache.async_set_cache(cache_key, {"model_id": "bedrock-deployment"}, ttl=3600)
+
+    await callback.async_pre_call_deployment_hook(
+        kwargs={
+            "metadata": {
+                "user_api_key_hash": user_key,
+                "deployment_model_name": model_group,
+                "_failover_excluded_ids": ["bedrock-deployment"],
+            },
+            "model_info": {"id": "openrouter-deployment"},
+        },
+        call_type=None,
+    )
+
+    assert await callback.cache.async_get_cache(key=cache_key) == {"model_id": "openrouter-deployment"}
+
+
+@pytest.mark.asyncio
 async def test_async_filter_deployments_does_not_pin_when_target_order_is_set():
     user_key = "user-key-order-fallback"
     stable_model_map_key = "claude-sonnet-4-5@20250929"
