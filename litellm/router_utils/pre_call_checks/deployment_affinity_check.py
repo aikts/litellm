@@ -324,8 +324,20 @@ class DeploymentAffinityCheck(CustomLogger):
     def _set_local_pin(self, cache_key: str, value: object, ttl_seconds: int) -> None:
         set_local_affinity_pin(self.cache, cache_key, value, ttl_seconds)
 
-    async def _claim_pin(self, cache_key: str, pin_value: DeploymentAffinityCacheValue, ttl_seconds: int) -> str | None:
-        winner: Final = await claim_affinity_pin(self.cache, cache_key, pin_value, ttl_seconds)
+    async def _claim_pin(
+        self,
+        cache_key: str,
+        pin_value: DeploymentAffinityCacheValue,
+        ttl_seconds: int,
+        eligible_values: tuple[Mapping[str, str], ...] | None = None,
+    ) -> str | None:
+        winner: Final = await claim_affinity_pin(
+            self.cache,
+            cache_key,
+            pin_value,
+            ttl_seconds,
+            eligible_values=eligible_values,
+        )
         return self._pinned_model_id(winner)
 
     def _claim_pin_in_memory(
@@ -345,6 +357,21 @@ class DeploymentAffinityCheck(CustomLogger):
                 return deployment
         return None
 
+    @staticmethod
+    def _get_affinity_deployments(healthy_deployments: list[dict], request_kwargs: Mapping[str, object]) -> list[dict]:
+        excluded_deployment_ids: Final = request_kwargs.get("_excluded_deployment_ids")
+        if not isinstance(excluded_deployment_ids, list):
+            return healthy_deployments
+
+        excluded: Final = {str(model_id) for model_id in excluded_deployment_ids}
+        return [
+            deployment
+            for deployment in healthy_deployments
+            if not isinstance(model_info := deployment.get("model_info"), dict)
+            or model_info.get("id") is None
+            or str(model_info["id"]) not in excluded
+        ]
+
     async def async_filter_deployments(
         self,
         model: str,
@@ -362,6 +389,10 @@ class DeploymentAffinityCheck(CustomLogger):
         typed_healthy_deployments: Final = cast(list[dict], healthy_deployments)
         if request_kwargs.get("_target_order") is not None:
             return typed_healthy_deployments
+        affinity_deployments: Final = self._get_affinity_deployments(
+            healthy_deployments=typed_healthy_deployments,
+            request_kwargs=request_kwargs,
+        )
 
         (
             enable_user_key,
@@ -376,7 +407,7 @@ class DeploymentAffinityCheck(CustomLogger):
                 responses_model_id = ResponsesAPIRequestUtils.get_model_id_from_response_id(str(previous_response_id))
                 if responses_model_id is not None:
                     deployment = self._find_deployment_by_model_id(
-                        healthy_deployments=typed_healthy_deployments,
+                        healthy_deployments=affinity_deployments,
                         model_id=responses_model_id,
                     )
                     if deployment is not None:
@@ -390,7 +421,7 @@ class DeploymentAffinityCheck(CustomLogger):
             return typed_healthy_deployments
 
         stable_model_map_key: Final = self._get_stable_model_map_key_from_deployments(
-            healthy_deployments=typed_healthy_deployments
+            healthy_deployments=affinity_deployments
         )
         if stable_model_map_key is None:
             return typed_healthy_deployments
@@ -421,7 +452,7 @@ class DeploymentAffinityCheck(CustomLogger):
 
                 if session_model_id:
                     session_deployment: Final = self._find_deployment_by_model_id(
-                        healthy_deployments=typed_healthy_deployments,
+                        healthy_deployments=affinity_deployments,
                         model_id=session_model_id,
                     )
                     if session_deployment is not None:
@@ -458,7 +489,7 @@ class DeploymentAffinityCheck(CustomLogger):
             return typed_healthy_deployments
 
         deployment = self._find_deployment_by_model_id(
-            healthy_deployments=typed_healthy_deployments,
+            healthy_deployments=affinity_deployments,
             model_id=model_id,
         )
         if deployment is None:
@@ -547,6 +578,15 @@ class DeploymentAffinityCheck(CustomLogger):
             return None
 
         pin_value: Final = DeploymentAffinityCacheValue(model_id=str(model_id))
+        failover_excluded_ids: Final = {  # comprehension-ok: collect all weighted-failover hops across metadata aliases
+            str(excluded_model_id)
+            for metadata in metadata_dicts
+            if isinstance(excluded_ids := metadata.get("_failover_excluded_ids"), list)
+            for excluded_model_id in excluded_ids
+        }
+        eligible_values: Final = (
+            (pin_value,) if failover_excluded_ids and pin_value["model_id"] not in failover_excluded_ids else None
+        )
 
         if enable_user_key and user_key is not None:
             try:
@@ -555,6 +595,7 @@ class DeploymentAffinityCheck(CustomLogger):
                     cache_key=cache_key,
                     pin_value=pin_value,
                     ttl_seconds=self.ttl_seconds,
+                    eligible_values=eligible_values,
                 )
                 if claimed_user_pin == pin_value["model_id"]:
                     verbose_router_logger.debug(
@@ -590,6 +631,7 @@ class DeploymentAffinityCheck(CustomLogger):
                     cache_key=session_cache_key,
                     pin_value=pin_value,
                     ttl_seconds=session_affinity_ttl,
+                    eligible_values=eligible_values,
                 )
                 if claimed_session_pin == pin_value["model_id"]:
                     verbose_router_logger.debug(
