@@ -9,7 +9,7 @@
 #
 # Build args:
 #   BASE_IMAGE                   - public overlay image (output of Dockerfile.public),
-#                                  e.g. ghcr.io/aikts/litellm-database:v1.104.0
+#                                  e.g. ghcr.io/aikts/litellm-database:v1.104.2
 #   EXTRA_INDEX_URL              - private PyPI index URL
 #   AP_LITELLM_MODULES_VERSION   - pinned version of ap-litellm-modules to install
 

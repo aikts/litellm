@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       upstream_tag:
-        description: "Upstream litellm-database tag to overlay on (e.g. v1.104.0)"
+        description: "Upstream litellm-database tag to overlay on (e.g. v1.104.2)"
         required: false
         type: string
 
@@ -30,7 +30,7 @@ env:
   UPSTREAM_IMAGE: ghcr.io/berriai/litellm-database
   PUBLIC_IMAGE: ghcr.io/${{ github.repository_owner }}/litellm-database
   # Default upstream tag for this stable branch. Override via workflow_dispatch input.
-  DEFAULT_UPSTREAM_TAG: v1.104.0
+  DEFAULT_UPSTREAM_TAG: v1.104.2
 
 jobs:
   build-public:

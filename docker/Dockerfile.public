@@ -4,7 +4,7 @@
 # Python patches on top. No private dependencies — safe to publish to ghcr.io.
 #
 # Build args:
-#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.104.0
+#   BASE_IMAGE   - upstream image, e.g. ghcr.io/berriai/litellm-database:v1.104.2
 #
 # To patch a new file:
 #   1. Edit it in the source tree (litellm/<path>).
@@ -30,6 +30,7 @@ COPY litellm/proxy/_lazy_features.py /tmp/overlay/litellm/proxy/_lazy_features.p
 COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py
 COPY litellm/responses/litellm_completion_transformation/streaming_iterator.py /tmp/overlay/litellm/responses/litellm_completion_transformation/streaming_iterator.py
 COPY litellm/responses/streaming_iterator.py /tmp/overlay/litellm/responses/streaming_iterator.py
+COPY litellm/router_utils/pre_call_checks/deployment_affinity_check.py /tmp/overlay/litellm/router_utils/pre_call_checks/deployment_affinity_check.py
 COPY litellm/types/utils.py /tmp/overlay/litellm/types/utils.py
 # ---- end patched files ----
 
