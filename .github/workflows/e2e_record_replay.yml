@@ -1,9 +1,6 @@
 name: "E2E Record and Replay"
 
 on:
-  schedule:
-    - cron: "0 8 * * 6"
-    - cron: "0 8 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:
