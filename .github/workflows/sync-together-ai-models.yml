@@ -1,8 +1,6 @@
 name: Sync Together AI model registry
 
 on:
-  schedule:
-    - cron: "30 6 * * *"
   workflow_dispatch:
 
 permissions:

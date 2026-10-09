@@ -1,8 +1,6 @@
 name: Auto-close duplicate issues
 
 on:
-  schedule:
-    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
