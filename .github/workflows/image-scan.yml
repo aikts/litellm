@@ -26,8 +26,6 @@ on:
       - ui/Dockerfile
       - ui/nginx.conf
       - .github/workflows/image-scan.yml
-  schedule:
-    - cron: "41 6 * * *"
   workflow_dispatch:
 
 permissions: {}
