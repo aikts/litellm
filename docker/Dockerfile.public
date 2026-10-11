@@ -16,6 +16,8 @@ FROM ${BASE_IMAGE}
 
 USER root
 
+COPY --chmod=0644 docker/certs/selectel-dbaas-ca.pem /etc/ssl/certs/selectel-dbaas-ca.pem
+
 # ---- PATCHED FILES (add one COPY per patched file, keep the source path) ----
 COPY litellm/__init__.py /tmp/overlay/litellm/__init__.py
 COPY litellm/cost_calculator.py /tmp/overlay/litellm/cost_calculator.py

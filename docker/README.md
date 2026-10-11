@@ -97,6 +97,12 @@ docker run --rm --network none --entrypoint prisma ghcr.io/berriai/litellm:main-
 
 This command should succeed (showing engine versions) even with `--network none`, confirming that Prisma binaries are available without network access.
 
+## KTS overlay CA certificate
+
+The KTS public overlay (`docker/Dockerfile.public`) includes the [Selectel DBaaS root CA](https://storage.dbaas.selcloud.ru/CA.pem) at `/etc/ssl/certs/selectel-dbaas-ca.pem`, readable by all users. Set your connection's CA file to this path when configuring TLS for Selectel DBaaS
+
+The PEM is stored in `docker/certs/selectel-dbaas-ca.pem`; its SHA-256 is `7836723bfea3db2ebe418779f60f1ddd8ed6a50e904c9ba67b7db13a2a417ce7`
+
 ## Troubleshooting
 
 -   **`build_admin_ui.sh: not found`**: This error can occur if the Docker build context is not set correctly. Ensure that you are running the `docker-compose` command from the root of the project.
