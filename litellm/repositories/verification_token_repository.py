@@ -170,6 +170,7 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
         object_permission_id: str | None = None,
         access_group_ids: list[str] | None = None,
         budget_id: str | None = None,
+        key_type: str | None = None,
     ) -> dict[str, object]:
         """Build data dictionary for token creation."""
         json_fields: Final = {
@@ -180,6 +181,7 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
         }
         simple_fields: Final = {
             "token": token,
+            "key_type": key_type,
             "key_name": key_name,
             "key_alias": key_alias,
             "max_budget": max_budget,
@@ -237,6 +239,7 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
         object_permission_id: str | None = None,
         access_group_ids: list[str] | None = None,
         budget_id: str | None = None,
+        key_type: str | None = None,
     ) -> LiteLLM_VerificationToken:
         """Create a new verification token."""
         data: Final = self._build_token_data(
@@ -265,6 +268,7 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
             object_permission_id=object_permission_id,
             access_group_ids=access_group_ids,
             budget_id=budget_id,
+            key_type=key_type,
         )
         return await self.create(data)
 
