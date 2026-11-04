@@ -379,22 +379,25 @@ class LiteLLMAiohttpTransport(AiohttpTransport):
         # not a valid value for aiohttp's ssl parameter).
         ssl_option: Final[AiohttpSslRequestOption] = _NO_SSL_OVERRIDE if ssl_verify is None else {"ssl": ssl_verify}
 
-        response: Final = await client_session.request(
-            method=request.method,
-            url=YarlURL(str(request.url), encoded=True),
-            headers=request.headers,
-            data=data,
-            allow_redirects=False,
-            auto_decompress=False,
-            timeout=ClientTimeout(
-                sock_connect=timeout.connect,
-                sock_read=timeout.read,
-                connect=timeout.pool,
-            ),
-            proxy=proxy,
-            server_hostname=sni_hostname,
-            **ssl_option,
-        ).__aenter__()
+        response: Final = await asyncio.wait_for(
+            client_session.request(
+                method=request.method,
+                url=YarlURL(str(request.url), encoded=True),
+                headers=request.headers,
+                data=data,
+                allow_redirects=False,
+                auto_decompress=False,
+                timeout=ClientTimeout(
+                    sock_connect=timeout.connect,
+                    sock_read=timeout.read,
+                    connect=timeout.pool,
+                ),
+                proxy=proxy,
+                server_hostname=sni_hostname,
+                **ssl_option,
+            ).__aenter__(),
+            timeout=timeout.read,
+        )
 
         return response
 
