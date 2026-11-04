@@ -26,6 +26,7 @@ COPY litellm/litellm_core_utils/litellm_logging.py /tmp/overlay/litellm/litellm_
 COPY litellm/litellm_core_utils/llm_cost_calc/usage_object_transformation.py /tmp/overlay/litellm/litellm_core_utils/llm_cost_calc/usage_object_transformation.py
 COPY litellm/litellm_core_utils/llm_response_utils/response_metadata.py /tmp/overlay/litellm/litellm_core_utils/llm_response_utils/response_metadata.py
 COPY litellm/litellm_core_utils/streaming_handler.py /tmp/overlay/litellm/litellm_core_utils/streaming_handler.py
+COPY litellm/llms/custom_httpx/aiohttp_transport.py /tmp/overlay/litellm/llms/custom_httpx/aiohttp_transport.py
 COPY litellm/llms/openrouter/chat/transformation.py /tmp/overlay/litellm/llms/openrouter/chat/transformation.py
 COPY litellm/main.py /tmp/overlay/litellm/main.py
 COPY litellm/proxy/_lazy_features.py /tmp/overlay/litellm/proxy/_lazy_features.py
