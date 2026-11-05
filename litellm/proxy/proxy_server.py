@@ -613,6 +613,7 @@ from litellm.proxy.management_endpoints.key_management_endpoints import (
 from litellm.proxy.management_endpoints.key_management_endpoints import (
     router as key_management_router,
 )
+from litellm.proxy.management_endpoints.key_migration import router as key_migration_router
 from litellm.proxy.management_endpoints.management_v1 import (
     router as management_v1_router,
 )
@@ -19699,6 +19700,7 @@ if _kts_llm_passthrough_enabled:
     reserve_lazy_slot(app, "llm_passthrough")
 app.include_router(pass_through_router)
 app.include_router(health_router)
+app.include_router(key_migration_router)
 app.include_router(key_management_router)
 app.include_router(internal_user_router)
 app.include_router(password_management_router)
