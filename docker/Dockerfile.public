@@ -29,11 +29,16 @@ COPY litellm/litellm_core_utils/streaming_handler.py /tmp/overlay/litellm/litell
 COPY litellm/llms/custom_httpx/aiohttp_transport.py /tmp/overlay/litellm/llms/custom_httpx/aiohttp_transport.py
 COPY litellm/llms/openrouter/chat/transformation.py /tmp/overlay/litellm/llms/openrouter/chat/transformation.py
 COPY litellm/main.py /tmp/overlay/litellm/main.py
+COPY litellm/models/verification_token.py /tmp/overlay/litellm/models/verification_token.py
 COPY litellm/proxy/_lazy_features.py /tmp/overlay/litellm/proxy/_lazy_features.py
+COPY litellm/proxy/management_endpoints/key_migration.py /tmp/overlay/litellm/proxy/management_endpoints/key_migration.py
+COPY litellm/proxy/management_helpers/key_migration.py /tmp/overlay/litellm/proxy/management_helpers/key_migration.py
 COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py
+COPY litellm/repositories/verification_token_repository.py /tmp/overlay/litellm/repositories/verification_token_repository.py
 COPY litellm/responses/litellm_completion_transformation/streaming_iterator.py /tmp/overlay/litellm/responses/litellm_completion_transformation/streaming_iterator.py
 COPY litellm/responses/streaming_iterator.py /tmp/overlay/litellm/responses/streaming_iterator.py
 COPY litellm/router_utils/pre_call_checks/deployment_affinity_check.py /tmp/overlay/litellm/router_utils/pre_call_checks/deployment_affinity_check.py
+COPY litellm/types/proxy/management_endpoints/key_migration.py /tmp/overlay/litellm/types/proxy/management_endpoints/key_migration.py
 COPY litellm/types/utils.py /tmp/overlay/litellm/types/utils.py
 # ---- end patched files ----
 
