@@ -62,7 +62,9 @@ def test_get_stream_options_passes_caller_stream_options_through_on_any_host(api
 
 
 @pytest.mark.asyncio
-async def test_acompletion_returns_json_reply_over_injected_transport():
+@pytest.mark.parametrize("provider", ["openai", "custom_openai"])
+@pytest.mark.parametrize("with_extra_params", [False, True])
+async def test_acompletion_returns_json_reply_over_injected_transport(provider: str, with_extra_params: bool):
     outbound: Final = asyncio.Queue()
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -89,7 +91,9 @@ async def test_acompletion_returns_json_reply_over_injected_transport():
         client: Final = AsyncOpenAI(api_key="transport-only", http_client=http_client)
         response: Final = await asyncio.wait_for(
             litellm.acompletion(
-                model="openai/gpt-5.6",
+                model=f"{provider}/gpt-5.6",
+                cache_control={"type": "ephemeral"} if with_extra_params else None,
+                extra_body={"provider_flag": True} if with_extra_params else {},
                 api_key="transport-only",
                 client=client,
                 messages=[{"role": "user", "content": "smoke-json-request"}],
@@ -102,6 +106,9 @@ async def test_acompletion_returns_json_reply_over_injected_transport():
         assert request["model"] == "gpt-5.6"
         assert request["messages"] == [{"role": "user", "content": "smoke-json-request"}]
         assert not request.get("stream")
+        assert request.get("cache_control") == ({"type": "ephemeral"} if with_extra_params else None)
+        assert request.get("provider_flag") is (True if with_extra_params else None)
+        assert "extra_body" not in request
         assert outbound.empty()
         assert response.choices[0].message.content == "smoke-json-reply"
         assert response.choices[0].finish_reason == "stop"
@@ -109,7 +116,9 @@ async def test_acompletion_returns_json_reply_over_injected_transport():
 
 
 @pytest.mark.asyncio
-async def test_acompletion_streams_text_deltas_over_injected_transport():
+@pytest.mark.parametrize("provider", ["openai", "custom_openai"])
+@pytest.mark.parametrize("with_extra_params", [False, True])
+async def test_acompletion_streams_text_deltas_over_injected_transport(provider: str, with_extra_params: bool):
     outbound: Final = asyncio.Queue()
 
     def chunk(delta: dict, finish: str | None) -> bytes:
@@ -145,7 +154,9 @@ async def test_acompletion_streams_text_deltas_over_injected_transport():
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
         client: Final = AsyncOpenAI(api_key="transport-only", http_client=http_client)
         stream: Final = await litellm.acompletion(
-            model="openai/gpt-5.6",
+            model=f"{provider}/gpt-5.6",
+            cache_control={"type": "ephemeral"} if with_extra_params else None,
+            extra_body={"provider_flag": True} if with_extra_params else {},
             api_key="transport-only",
             client=client,
             messages=[{"role": "user", "content": "smoke-stream-request"}],
@@ -162,6 +173,9 @@ async def test_acompletion_streams_text_deltas_over_injected_transport():
         await asyncio.wait_for(drain(), timeout=10)
         request: Final = await asyncio.wait_for(outbound.get(), timeout=10)
         assert request["stream"] is True
+        assert request.get("cache_control") == ({"type": "ephemeral"} if with_extra_params else None)
+        assert request.get("provider_flag") is (True if with_extra_params else None)
+        assert "extra_body" not in request
         assert outbound.empty()
         assert (
             "".join(part.choices[0].delta.content or "" for part in chunks if part.choices and part.choices[0].delta)
@@ -350,3 +364,26 @@ async def test_async_audio_speech_records_provider_response_headers():
         )
 
     _assert_provider_headers_recorded(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_custom_openai_preserves_provider_rejection(stream: bool) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["cache_control"] == {"type": "ephemeral"}
+        return httpx.Response(
+            400, json={"error": {"message": "provider rejected parameter", "type": "invalid_request_error"}}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        client: Final = AsyncOpenAI(api_key="transport-only", http_client=http_client, max_retries=0)
+        with pytest.raises(litellm.BadRequestError, match="provider rejected parameter"):
+            await litellm.acompletion(
+                model="custom_openai/example-chat-model",
+                messages=[{"role": "user", "content": "Hello"}],
+                cache_control={"type": "ephemeral"},
+                client=client,
+                stream=stream,
+                num_retries=0,
+                max_retries=0,
+            )

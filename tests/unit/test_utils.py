@@ -3075,7 +3075,7 @@ class TestAdditionalDropParamsForNonOpenAIProviders:
 
 
 class TestExtraBodyCannotOverrideModel:
-    @pytest.mark.parametrize("custom_llm_provider", ["edenai", "openai", "azure"])
+    @pytest.mark.parametrize("custom_llm_provider", ["edenai", "openai", "azure", "custom_openai"])
     def test_extra_body_model_is_dropped_for_openai_compatible_providers(self, custom_llm_provider: str) -> None:
         from litellm.utils import add_provider_specific_params_to_optional_params
 
@@ -6346,3 +6346,20 @@ def test_function_setup_never_logs_the_ocr_data_uri_payload() -> None:
 
     assert logged == [{"role": "user", "content": f"data:application/pdf;base64 ({len(payload)} chars)"}]
     assert payload not in str(logged)
+
+
+@pytest.mark.parametrize("provider", ["custom_openai", "openai"])
+def test_provider_extra_params_merge_and_drop(provider: str) -> None:
+    from litellm.utils import get_optional_params
+
+    result: Final = get_optional_params(
+        model="example-chat-model",
+        custom_llm_provider=provider,
+        temperature=0.3,
+        cache_control={"type": "ephemeral"},
+        extra_body={"cache_control": {"type": "overridden"}, "thinking": {"type": "disabled"}, "drop_me": 1},
+        additional_drop_params=["drop_me"],
+    )
+    assert result["temperature"] == 0.3
+    assert result["extra_body"] == {"cache_control": {"type": "ephemeral"}, "thinking": {"type": "disabled"}}
+    assert "cache_control" not in result
