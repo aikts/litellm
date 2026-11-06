@@ -40,6 +40,7 @@ COPY litellm/responses/streaming_iterator.py /tmp/overlay/litellm/responses/stre
 COPY litellm/router_utils/pre_call_checks/deployment_affinity_check.py /tmp/overlay/litellm/router_utils/pre_call_checks/deployment_affinity_check.py
 COPY litellm/types/proxy/management_endpoints/key_migration.py /tmp/overlay/litellm/types/proxy/management_endpoints/key_migration.py
 COPY litellm/types/utils.py /tmp/overlay/litellm/types/utils.py
+COPY litellm/utils.py /tmp/overlay/litellm/utils.py
 # ---- end patched files ----
 
 # Resolve the canonical site-packages litellm install (where uvicorn/CMD imports
