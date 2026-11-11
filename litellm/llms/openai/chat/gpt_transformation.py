@@ -48,6 +48,7 @@ from litellm.types.utils import (
     ChatCompletionMessageToolCall,
     Choices,
     Function,
+    LlmProviders,
     Message,
     ModelResponse,
     ModelResponseStream,
@@ -430,8 +431,9 @@ class OpenAIGPTConfig(BaseLLMModelInfo, BaseConfig):
         api_base. Those can understand cache_control, so it must survive there.
         Real OpenAI cannot, so it is still stripped for an openai.com host.
         """
-        return custom_llm_provider == "openai" and not self._targets_openai_hosted_endpoint(
-            custom_llm_provider, api_base
+        return custom_llm_provider == LlmProviders.CUSTOM_OPENAI or (
+            custom_llm_provider == LlmProviders.OPENAI
+            and not self._targets_openai_hosted_endpoint(custom_llm_provider, api_base)
         )
 
     def _sanitized_tools_update_for_openai(
