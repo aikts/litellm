@@ -735,7 +735,15 @@ class TestCacheControlPreservationForCustomEndpoint:
         monkeypatch.setattr(litellm, "api_base", None, raising=False)
 
     @staticmethod
-    def _cache_controlled_messages():
+    def _cache_controlled_messages(content_block: bool = False):
+        if content_block:
+            return [
+                {"role": "system", "content": "You are helpful."},
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Hello", "cache_control": {"type": "ephemeral"}}],
+                },
+            ]
         return [
             {
                 "role": "system",
@@ -744,15 +752,15 @@ class TestCacheControlPreservationForCustomEndpoint:
             },
             {
                 "role": "user",
-                "content": [{"type": "text", "text": "Hello", "cache_control": {"type": "ephemeral"}}],
+                "content": "Hello",
                 "cache_control": {"type": "ephemeral"},
             },
         ]
 
-    def _transform(self, custom_llm_provider, api_base, optional_params=None):
+    def _transform(self, custom_llm_provider, api_base, optional_params=None, content_block: bool = False):
         return self.config.transform_request(
             model="claude-sonnet-4",
-            messages=self._cache_controlled_messages(),
+            messages=self._cache_controlled_messages(content_block=content_block),
             optional_params=optional_params or {},
             litellm_params={
                 "custom_llm_provider": custom_llm_provider,
@@ -793,18 +801,24 @@ class TestCacheControlPreservationForCustomEndpoint:
         )
 
     @pytest.mark.parametrize("provider", ["openai", "custom_openai"])
-    def test_transform_request_preserves_for_custom_api_base(self, provider):
-        body = self._transform(provider, "http://localhost:4000/v1")
-        assert all("cache_control" in m for m in body["messages"])
-        assert body["messages"][1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    def test_transform_request_preserves_for_custom_api_base(self, provider, content_block):
+        body = self._transform(provider, "http://localhost:4000/v1", content_block=content_block)
+        assert body["messages"] == self._cache_controlled_messages(content_block=content_block)
 
-    def test_transform_request_strips_for_real_openai(self):
-        body = self._transform("openai", None)
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    def test_transform_request_strips_for_real_openai(self, content_block):
+        body = self._transform("openai", None, content_block=content_block)
         assert all("cache_control" not in m for m in body["messages"])
+        if content_block:
+            assert "cache_control" not in body["messages"][1]["content"][0]
 
-    def test_transform_request_strips_for_non_openai_provider(self):
-        body = self._transform("fireworks_ai", "https://api.fireworks.ai/inference/v1")
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    def test_transform_request_strips_for_non_openai_provider(self, content_block):
+        body = self._transform("fireworks_ai", "https://api.fireworks.ai/inference/v1", content_block=content_block)
         assert all("cache_control" not in m for m in body["messages"])
+        if content_block:
+            assert "cache_control" not in body["messages"][1]["content"][0]
 
     @pytest.mark.parametrize("provider", ["openai", "custom_openai"])
     def test_transform_request_preserves_tool_cache_control(self, provider):
@@ -820,10 +834,11 @@ class TestCacheControlPreservationForCustomEndpoint:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("provider", ["openai", "custom_openai"])
-    async def test_async_transform_request_preserves_for_custom_api_base(self, provider):
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    async def test_async_transform_request_preserves_for_custom_api_base(self, provider, content_block):
         body = await self.config.async_transform_request(
             model="claude-sonnet-4",
-            messages=self._cache_controlled_messages(),
+            messages=self._cache_controlled_messages(content_block=content_block),
             optional_params={},
             litellm_params={
                 "custom_llm_provider": provider,
@@ -831,19 +846,21 @@ class TestCacheControlPreservationForCustomEndpoint:
             },
             headers={},
         )
-        assert all("cache_control" in m for m in body["messages"])
-        assert body["messages"][1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert body["messages"] == self._cache_controlled_messages(content_block=content_block)
 
     @pytest.mark.asyncio
-    async def test_async_transform_request_strips_for_real_openai(self):
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    async def test_async_transform_request_strips_for_real_openai(self, content_block):
         body = await self.config.async_transform_request(
             model="gpt-4o",
-            messages=self._cache_controlled_messages(),
+            messages=self._cache_controlled_messages(content_block=content_block),
             optional_params={},
             litellm_params={"custom_llm_provider": "openai", "api_base": None},
             headers={},
         )
         assert all("cache_control" not in m for m in body["messages"])
+        if content_block:
+            assert "cache_control" not in body["messages"][1]["content"][0]
 
 
 class TestToolChoiceWithoutToolsDropped:
