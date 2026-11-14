@@ -3,9 +3,9 @@ Tests for OpenAI GPT transformation (litellm/llms/openai/chat/gpt_transformation
 """
 
 
-import pytest
 from typing import Final
 
+import pytest
 
 import litellm
 from litellm.litellm_core_utils.prompt_templates.common_utils import TOOL_RESULT_IMAGE_BOUNDARY
@@ -735,7 +735,15 @@ class TestCacheControlPreservationForCustomEndpoint:
         monkeypatch.setattr(litellm, "api_base", None, raising=False)
 
     @staticmethod
-    def _cache_controlled_messages():
+    def _cache_controlled_messages(content_block: bool = False):
+        if content_block:
+            return [
+                {"role": "system", "content": "You are helpful."},
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Hello", "cache_control": {"type": "ephemeral"}}],
+                },
+            ]
         return [
             {
                 "role": "system",
@@ -749,10 +757,10 @@ class TestCacheControlPreservationForCustomEndpoint:
             },
         ]
 
-    def _transform(self, custom_llm_provider, api_base, optional_params=None):
+    def _transform(self, custom_llm_provider, api_base, optional_params=None, content_block: bool = False):
         return self.config.transform_request(
             model="claude-sonnet-4",
-            messages=self._cache_controlled_messages(),
+            messages=self._cache_controlled_messages(content_block=content_block),
             optional_params=optional_params or {},
             litellm_params={
                 "custom_llm_provider": custom_llm_provider,
@@ -762,78 +770,58 @@ class TestCacheControlPreservationForCustomEndpoint:
         )
 
     def test_predicate_openai_provider_custom_api_base_preserves(self):
-        assert (
-            self.config._should_preserve_cache_control_for_endpoint(
-                "openai", "http://localhost:4000/v1"
-            )
-            is True
-        )
+        assert self.config._should_preserve_cache_control_for_endpoint("openai", "http://localhost:4000/v1") is True
 
     def test_predicate_real_openai_no_api_base_strips(self):
-        assert (
-            self.config._should_preserve_cache_control_for_endpoint("openai", None)
-            is False
-        )
+        assert self.config._should_preserve_cache_control_for_endpoint("openai", None) is False
 
     def test_predicate_explicit_openai_host_strips(self):
-        assert (
-            self.config._should_preserve_cache_control_for_endpoint(
-                "openai", "https://api.openai.com/v1"
-            )
-            is False
-        )
+        assert self.config._should_preserve_cache_control_for_endpoint("openai", "https://api.openai.com/v1") is False
 
     def test_predicate_non_openai_provider_strips(self):
-        assert (
-            self.config._should_preserve_cache_control_for_endpoint(
-                "deepseek", "https://api.deepseek.com"
-            )
-            is False
-        )
+        assert self.config._should_preserve_cache_control_for_endpoint("deepseek", "https://api.deepseek.com") is False
 
     def test_predicate_resolves_openai_base_url_env(self, monkeypatch):
         monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:4000/v1")
-        assert (
-            self.config._should_preserve_cache_control_for_endpoint("openai", None)
-            is True
-        )
+        assert self.config._should_preserve_cache_control_for_endpoint("openai", None) is True
 
     def test_predicate_resolves_openai_api_base_env(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_BASE", "http://localhost:4000/v1")
-        assert (
-            self.config._should_preserve_cache_control_for_endpoint("openai", None)
-            is True
-        )
+        assert self.config._should_preserve_cache_control_for_endpoint("openai", None) is True
 
     def test_predicate_lookalike_host_is_not_treated_as_openai(self):
         assert (
-            self.config._should_preserve_cache_control_for_endpoint(
-                "openai", "https://api.openai.com.evil.example/v1"
-            )
+            self.config._should_preserve_cache_control_for_endpoint("openai", "https://api.openai.com.evil.example/v1")
             is True
         )
 
     def test_predicate_openai_subdomain_strips(self):
         assert (
-            self.config._should_preserve_cache_control_for_endpoint(
-                "openai", "https://eu.api.openai.com/v1"
-            )
-            is False
+            self.config._should_preserve_cache_control_for_endpoint("openai", "https://eu.api.openai.com/v1") is False
         )
 
-    def test_transform_request_preserves_for_custom_api_base(self):
-        body = self._transform("openai", "http://localhost:4000/v1")
-        assert all("cache_control" in m for m in body["messages"])
+    @pytest.mark.parametrize("provider", ["openai", "custom_openai"])
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    def test_transform_request_preserves_for_custom_api_base(self, provider, content_block):
+        body = self._transform(provider, "http://localhost:4000/v1", content_block=content_block)
+        assert body["messages"] == self._cache_controlled_messages(content_block=content_block)
 
-    def test_transform_request_strips_for_real_openai(self):
-        body = self._transform("openai", None)
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    def test_transform_request_strips_for_real_openai(self, content_block):
+        body = self._transform("openai", None, content_block=content_block)
         assert all("cache_control" not in m for m in body["messages"])
+        if content_block:
+            assert "cache_control" not in body["messages"][1]["content"][0]
 
-    def test_transform_request_strips_for_non_openai_provider(self):
-        body = self._transform("fireworks_ai", "https://api.fireworks.ai/inference/v1")
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    def test_transform_request_strips_for_non_openai_provider(self, content_block):
+        body = self._transform("fireworks_ai", "https://api.fireworks.ai/inference/v1", content_block=content_block)
         assert all("cache_control" not in m for m in body["messages"])
+        if content_block:
+            assert "cache_control" not in body["messages"][1]["content"][0]
 
-    def test_transform_request_preserves_tool_cache_control(self):
+    @pytest.mark.parametrize("provider", ["openai", "custom_openai"])
+    def test_transform_request_preserves_tool_cache_control(self, provider):
         tools = [
             {
                 "type": "function",
@@ -841,35 +829,38 @@ class TestCacheControlPreservationForCustomEndpoint:
                 "cache_control": {"type": "ephemeral"},
             }
         ]
-        body = self._transform(
-            "openai", "http://localhost:4000/v1", optional_params={"tools": tools}
-        )
+        body = self._transform(provider, "http://localhost:4000/v1", optional_params={"tools": tools})
         assert "cache_control" in body["tools"][0]
 
     @pytest.mark.asyncio
-    async def test_async_transform_request_preserves_for_custom_api_base(self):
+    @pytest.mark.parametrize("provider", ["openai", "custom_openai"])
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    async def test_async_transform_request_preserves_for_custom_api_base(self, provider, content_block):
         body = await self.config.async_transform_request(
             model="claude-sonnet-4",
-            messages=self._cache_controlled_messages(),
+            messages=self._cache_controlled_messages(content_block=content_block),
             optional_params={},
             litellm_params={
-                "custom_llm_provider": "openai",
+                "custom_llm_provider": provider,
                 "api_base": "http://localhost:4000/v1",
             },
             headers={},
         )
-        assert all("cache_control" in m for m in body["messages"])
+        assert body["messages"] == self._cache_controlled_messages(content_block=content_block)
 
     @pytest.mark.asyncio
-    async def test_async_transform_request_strips_for_real_openai(self):
+    @pytest.mark.parametrize("content_block", [False, True], ids=["message", "content-block"])
+    async def test_async_transform_request_strips_for_real_openai(self, content_block):
         body = await self.config.async_transform_request(
             model="gpt-4o",
-            messages=self._cache_controlled_messages(),
+            messages=self._cache_controlled_messages(content_block=content_block),
             optional_params={},
             litellm_params={"custom_llm_provider": "openai", "api_base": None},
             headers={},
         )
         assert all("cache_control" not in m for m in body["messages"])
+        if content_block:
+            assert "cache_control" not in body["messages"][1]["content"][0]
 
 
 class TestToolChoiceWithoutToolsDropped:
