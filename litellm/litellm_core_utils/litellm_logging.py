@@ -607,6 +607,7 @@ class Logging(LiteLLMLoggingBaseClass):
         self.stream = stream
         self.start_time = start_time  # log the call start time
         self.call_type = call_type
+        self.proxy_request_outcome_hook: Callable[..., None] | None = None
         self.litellm_call_id = litellm_call_id
         self.litellm_trace_id: str = litellm_trace_id if litellm_trace_id else str(uuid.uuid4())
 
@@ -2252,6 +2253,14 @@ class Logging(LiteLLMLoggingBaseClass):
         litellm_params: Final = self.model_call_details.get("litellm_params", {}) or {}
         sync_sdk: Final = self._is_sync_litellm_request(litellm_params)
         passthrough: Final = self.call_type == CallTypes.pass_through.value
+        if self.stream:
+            for callback in litellm.callbacks:
+                observer = getattr(callback, "log_stream_attempt_failure", None)
+                if callable(observer):
+                    try:
+                        observer(self.model_call_details, exception)
+                    except Exception:
+                        verbose_logger.exception("Error logging stream attempt failure")
         if sync_sdk and not prefer_async_handlers and not passthrough:
             self.failure_handler(exception, traceback_exception)
             return
