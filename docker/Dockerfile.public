@@ -31,6 +31,7 @@ COPY litellm/llms/openrouter/chat/transformation.py /tmp/overlay/litellm/llms/op
 COPY litellm/main.py /tmp/overlay/litellm/main.py
 COPY litellm/models/verification_token.py /tmp/overlay/litellm/models/verification_token.py
 COPY litellm/proxy/_lazy_features.py /tmp/overlay/litellm/proxy/_lazy_features.py
+COPY litellm/proxy/common_request_processing.py /tmp/overlay/litellm/proxy/common_request_processing.py
 COPY litellm/proxy/management_endpoints/key_migration.py /tmp/overlay/litellm/proxy/management_endpoints/key_migration.py
 COPY litellm/proxy/management_helpers/key_migration.py /tmp/overlay/litellm/proxy/management_helpers/key_migration.py
 COPY litellm/proxy/proxy_server.py /tmp/overlay/litellm/proxy/proxy_server.py

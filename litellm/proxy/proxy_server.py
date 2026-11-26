@@ -390,8 +390,10 @@ from litellm.proxy.common_request_processing import (
     create_response,
     log_llm_api_exception,
     open_sse_before_first_byte,
+    record_proxy_request_outcome,
     request_litellm_call_id,
     resolve_litellm_call_id,
+    streaming_chunk_failed,
     ttft_keepalive_interval,
 )
 from litellm.proxy.common_utils.auth_cache_invalidation_pubsub import (
@@ -9579,6 +9581,9 @@ async def async_data_generator(
     verbose_proxy_logger.debug("inside generator")
     stream_completed = False
     client_disconnected = False
+    stream_failed = False
+    outcome_logging_obj: Final = request_data.get("litellm_logging_obj")
+    track_outcome: Final = getattr(outcome_logging_obj, "proxy_request_outcome_hook", None) is not None
     error_state: Final = ResponsesStreamErrorState() if responses_stream_errors else None
     try:
         error_message: str | None = None
@@ -9692,6 +9697,8 @@ async def async_data_generator(
 
             if error_state is not None:
                 error_state.observe_chunk(cast(object, chunk))  # cast-ok: the helper validates legacy untyped chunks
+            if track_outcome:
+                stream_failed = stream_failed or streaming_chunk_failed(chunk)
             raw_passthrough = False
             if isinstance(chunk, BaseModel):
                 chunk = _serialize_streaming_chunk(chunk)
@@ -9703,6 +9710,8 @@ async def async_data_generator(
                         frame, raw_sse_buffer = _pop_complete_sse_frame(raw_sse_buffer)
                         if frame is None:
                             break
+                        if track_outcome:
+                            stream_failed = stream_failed or streaming_chunk_failed(frame)
                         yield frame
                     if len(raw_sse_buffer) > _MAX_RAW_SSE_BUFFER_CHARS:
                         raise ValueError("Raw SSE stream exceeded maximum buffered size without a frame delimiter")
@@ -9716,11 +9725,14 @@ async def async_data_generator(
                     frame, raw_sse_buffer = _pop_complete_sse_frame(raw_sse_buffer)
                     if frame is None:
                         break
+                    if track_outcome:
+                        stream_failed = stream_failed or streaming_chunk_failed(frame)
                     yield frame
                 if len(raw_sse_buffer) > _MAX_RAW_SSE_BUFFER_CHARS:
                     raise ValueError("Raw SSE stream exceeded maximum buffered size without a frame delimiter")
                 raw_passthrough = True
             elif isinstance(chunk, str) and chunk.startswith("data: "):
+                stream_failed = True
                 error_message = chunk
                 break
 
@@ -9731,6 +9743,7 @@ async def async_data_generator(
                     else:
                         yield _format_streaming_sse_chunk(chunk=chunk)
                 except Exception as e:
+                    stream_failed = True
                     if error_state is not None:
                         raise
                     yield f"data: {e}\n\n"
@@ -9770,6 +9783,7 @@ async def async_data_generator(
             client_disconnected = True
         raise
     except Exception as e:
+        stream_failed = True
         verbose_proxy_logger.exception("litellm.proxy.proxy_server.async_data_generator(): Exception occured - %s", e)
         await proxy_logging_obj.post_call_failure_hook(
             user_api_key_dict=user_api_key_dict,
@@ -9809,6 +9823,11 @@ async def async_data_generator(
         stream_completed = True
         yield f"data: {error_returned}\n\n"
     finally:
+        record_proxy_request_outcome(
+            outcome_logging_obj,
+            "failure" if stream_failed else "success" if stream_completed else "interrupted",
+            streaming=True,
+        )
         await ProxyBaseLLMRequestProcessing._finalize_streaming_generator_cleanup(
             request=request,
             request_data=request_data,

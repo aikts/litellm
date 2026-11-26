@@ -1198,6 +1198,7 @@ async def open_sse_before_first_byte(
     ping_interval_seconds: float | str | None,
     media_type: str = "text/event-stream",
     on_late_failure: Callable[[Exception], Awaitable[HTTPException | None]] | None = None,
+    on_disconnect: Callable[[], None] | None = None,
 ) -> _LateResponseT | StreamingResponse:
     """Write SSE keepalive comments while the upstream LLM call is still in flight.
 
@@ -1247,6 +1248,10 @@ async def open_sse_before_first_byte(
                 return
             async for chunk in _relay_late_response(produced):
                 yield chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            if on_disconnect is not None:
+                on_disconnect()
+            raise
         finally:
             if not produce_task.done():
                 produce_task.cancel()
@@ -1667,6 +1672,35 @@ def _timing_values(
     if hidden_params.get("_response_ms") is not None or not use_logging_obj or logging_obj is None:
         return hidden_params
     return getattr(logging_obj, "response_timing_metrics", None) or {}  # mutable-ok: empty fallback
+
+
+def record_proxy_request_outcome(
+    logging_obj: object, outcome: Literal["success", "failure", "interrupted"], *, streaming: bool = False
+) -> None:
+    callback: Final = getattr(logging_obj, "proxy_request_outcome_hook", None)
+    if not callable(callback):
+        return
+    try:
+        callback(outcome, streaming=streaming)
+    except Exception:
+        verbose_proxy_logger.exception("Error recording proxy request outcome")
+
+
+def streaming_chunk_failed(chunk: object) -> bool:
+    if isinstance(chunk, Mapping):
+        return chunk.get("type") in ("error", "response.failed", "response.incomplete") or bool(chunk.get("error"))
+    if isinstance(chunk, (str, bytes)):
+        frame: Final = chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="replace")
+        if frame.startswith(("event: error", "event: response.failed", "event: response.incomplete")):
+            return True
+        if frame.startswith("data:"):
+            try:
+                data: Final = orjson.loads(frame[5:].strip())
+            except orjson.JSONDecodeError:
+                return False
+            return isinstance(data, dict) and streaming_chunk_failed(data)
+        return False
+    return getattr(chunk, "type", None) in ("error", "response.failed", "response.incomplete")
 
 
 class ProxyBaseLLMRequestProcessing:
@@ -2475,30 +2509,43 @@ class ProxyBaseLLMRequestProcessing:
                 request_data=self.data,
             )
 
+        async def _process_with_outcome() -> Any:
+            try:
+                return await self._process_llm_request(
+                    request=request,
+                    fastapi_response=fastapi_response,
+                    user_api_key_dict=user_api_key_dict,
+                    route_type=route_type,
+                    proxy_logging_obj=proxy_logging_obj,
+                    general_settings=general_settings,
+                    proxy_config=proxy_config,
+                    select_data_generator=select_data_generator,
+                    llm_router=llm_router,
+                    model=model,
+                    user_model=user_model,
+                    user_temperature=user_temperature,
+                    user_request_timeout=user_request_timeout,
+                    user_max_tokens=user_max_tokens,
+                    user_api_base=user_api_base,
+                    version=version,
+                    is_streaming_request=is_streaming_request,
+                    contents=contents,
+                    skip_pre_call_logic=skip_pre_call_logic,
+                )
+            except asyncio.CancelledError:
+                record_proxy_request_outcome(self.data.get("litellm_logging_obj"), "interrupted", streaming=True)
+                raise
+            except Exception:
+                record_proxy_request_outcome(self.data.get("litellm_logging_obj"), "failure")
+                raise
+
         return await open_sse_before_first_byte(
-            self._process_llm_request(
-                request=request,
-                fastapi_response=fastapi_response,
-                user_api_key_dict=user_api_key_dict,
-                route_type=route_type,
-                proxy_logging_obj=proxy_logging_obj,
-                general_settings=general_settings,
-                proxy_config=proxy_config,
-                select_data_generator=select_data_generator,
-                llm_router=llm_router,
-                model=model,
-                user_model=user_model,
-                user_temperature=user_temperature,
-                user_request_timeout=user_request_timeout,
-                user_max_tokens=user_max_tokens,
-                user_api_base=user_api_base,
-                version=version,
-                is_streaming_request=is_streaming_request,
-                contents=contents,
-                skip_pre_call_logic=skip_pre_call_logic,
-            ),
+            _process_with_outcome(),
             ping_interval_seconds=ttft_keepalive_interval(self.data, llm_router),
             on_late_failure=_audit_late_failure,
+            on_disconnect=lambda: record_proxy_request_outcome(
+                self.data.get("litellm_logging_obj"), "interrupted", streaming=True
+            ),
         )
 
     async def _process_llm_request(
@@ -2841,6 +2888,7 @@ class ProxyBaseLLMRequestProcessing:
                     request_headers=dict(request.headers),
                 )
                 if _early is not None:
+                    record_proxy_request_outcome(logging_obj, "success")
                     return _early
 
             response = await proxy_logging_obj.post_call_success_hook(
@@ -2962,6 +3010,7 @@ class ProxyBaseLLMRequestProcessing:
                 user_api_key_dict=user_api_key_dict,
             )
 
+        record_proxy_request_outcome(logging_obj, "success")
         return response
 
     @staticmethod
@@ -3888,6 +3937,9 @@ class ProxyBaseLLMRequestProcessing:
         stream_completed = False
         client_disconnected = False
         delivered_chunk = False
+        stream_failed = False
+        outcome_logging_obj: Final = request_data.get("litellm_logging_obj")
+        track_outcome: Final = getattr(outcome_logging_obj, "proxy_request_outcome_hook", None) is not None
         try:
             str_so_far = ""
             async for chunk in proxy_logging_obj.async_post_call_streaming_iterator_hook(
@@ -3932,6 +3984,8 @@ class ProxyBaseLLMRequestProcessing:
                 # awaited above, so a cancellation during it still leaves this
                 # False and refunds. A keepalive ping carries no provider output,
                 # so it must not suppress that refund.
+                if track_outcome:
+                    stream_failed = stream_failed or streaming_chunk_failed(chunk)
                 delivered_chunk = delivered_chunk or chunk != STREAM_SSE_KEEPALIVE_PING_BYTES
                 yield serialize_chunk(chunk)
             held_tail: Final = flush_tail() if flush_tail is not None else b""
@@ -3956,6 +4010,7 @@ class ProxyBaseLLMRequestProcessing:
                 await release_budget_reservation_on_cancel(getattr(user_api_key_dict, "budget_reservation", None))
             raise
         except Exception as e:
+            stream_failed = True
             verbose_proxy_logger.exception(
                 "litellm.proxy.proxy_server.async_data_generator(): Exception occured - %s", e
             )
@@ -3983,6 +4038,11 @@ class ProxyBaseLLMRequestProcessing:
             stream_completed = True
             yield serialize_error(proxy_exception)
         finally:
+            record_proxy_request_outcome(
+                outcome_logging_obj,
+                "failure" if stream_failed else "success" if stream_completed else "interrupted",
+                streaming=True,
+            )
             await ProxyBaseLLMRequestProcessing._finalize_streaming_generator_cleanup(
                 request=request,
                 request_data=request_data,
