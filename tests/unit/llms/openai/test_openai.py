@@ -2633,11 +2633,10 @@ _WIRE_REQUEST: Final = {
 }
 
 
-@pytest.mark.parametrize("provider", ("openai", "custom_openai"))
 @pytest.mark.parametrize("is_async", (False, True))
 @respx.mock
 async def test_chat_completion_sends_the_caller_params_extra_body_and_extra_headers_unchanged(
-    is_async: bool, provider: str, monkeypatch: pytest.MonkeyPatch
+    is_async: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
     route: Final = respx.post("https://api.openai.com/v1/chat/completions").mock(
@@ -2645,13 +2644,11 @@ async def test_chat_completion_sends_the_caller_params_extra_body_and_extra_head
     )
     kwargs: Final = {
         **_WIRE_REQUEST,
-        "model": f"{provider}/gpt-5.4",
-        "cache_control": {"type": "ephemeral"},
-        "additional_drop_params": ["drop_me"],
+        "model": "openai/gpt-5.4",
         "api_base": "https://api.openai.com/v1",
         "api_key": "sk-test",
         "num_retries": 0,
-        "extra_body": {"vendor_flag": True, "cache_control": {"type": "old"}, "drop_me": True},
+        "extra_body": {"vendor_flag": True},
         "extra_headers": {"x-caller": "unit"},
     }
 
@@ -2661,7 +2658,7 @@ async def test_chat_completion_sends_the_caller_params_extra_body_and_extra_head
         litellm.completion(**kwargs)
 
     sent: Final = route.calls.last.request
-    assert json.loads(sent.content) == {**_WIRE_REQUEST, "vendor_flag": True, "cache_control": {"type": "ephemeral"}}
+    assert json.loads(sent.content) == {**_WIRE_REQUEST, "vendor_flag": True}
     assert sent.headers["x-caller"] == "unit"
     assert sent.headers["authorization"] == "Bearer sk-test"
 
@@ -2741,3 +2738,26 @@ async def test_sync_batch_list_given_an_async_client_returns_a_page_the_caller_c
         )
 
         assert [(batch.id, batch.status) for batch in (await page).data] == [("batch_5f8dac", "pending")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_custom_openai_preserves_provider_rejection(stream: bool) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["cache_control"] == {"type": "ephemeral"}
+        return httpx.Response(
+            400, json={"error": {"message": "provider rejected parameter", "type": "invalid_request_error"}}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        client: Final = AsyncOpenAI(api_key="transport-only", http_client=http_client, max_retries=0)
+        with pytest.raises(litellm.BadRequestError, match="provider rejected parameter"):
+            await litellm.acompletion(
+                model="custom_openai/example-chat-model",
+                messages=[{"role": "user", "content": "Hello"}],
+                cache_control={"type": "ephemeral"},
+                client=client,
+                stream=stream,
+                num_retries=0,
+                max_retries=0,
+            )

@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       upstream_tag:
-        description: "Upstream litellm-database tag to overlay on (e.g. v1.83.10-stable)"
+        description: "Upstream litellm-database tag to overlay on (e.g. v1.110.4)"
         required: false
         type: string
 
