@@ -8569,6 +8569,46 @@ def test_register_model_over_a_builtin_row_bills_explicit_cache_hits(
         _invalidate_model_cost_lowercase_map()
 
 
+@pytest.mark.parametrize("override", [None, 5e-07, 0.0])
+def test_register_openrouter_model_preserves_bundled_cache_rate(
+    monkeypatch: pytest.MonkeyPatch, override: float | None
+) -> None:
+    from litellm.utils import _invalidate_model_cost_lowercase_map
+
+    key: Final = "openrouter/deepseek/deepseek-r1"
+    monkeypatch.setattr(litellm, "model_cost", {name: row for name, row in litellm.model_cost.items() if name != key})
+    _invalidate_model_cost_lowercase_map()
+    config: Final = {
+        "litellm_provider": "openrouter",
+        "input_cost_per_token": 2e-06,
+        "output_cost_per_token": 4e-06,
+        **({"cache_read_input_token_cost": override} if override is not None else {}),
+    }
+    try:
+        model_id: Final = "legacy-openrouter-cache-test"
+        router: Final = litellm.Router(
+            model_list=[
+                {
+                    "model_name": "cache-billing-test",
+                    "litellm_params": {"model": key, "api_key": "test"},
+                    "model_info": {**config, "id": model_id},
+                }
+            ]
+        )
+        assert model_id in router.registry().names("cache-billing-test", kind="ids")
+        cached: Final = ModelResponse(
+            usage=Usage(prompt_tokens=1000, completion_tokens=0, prompt_tokens_details={"cached_tokens": 1000})
+        )
+
+        # The legacy rate is pinned to the cost map bundled in upstream v1.104.2.
+        cache_rate: Final = 1.4e-07 if override is None else override
+        assert litellm.completion_cost(
+            completion_response=cached, model=key, custom_pricing=True, router_model_id=model_id
+        ) == pytest.approx(1000 * cache_rate)
+    finally:
+        _invalidate_model_cost_lowercase_map()
+
+
 @pytest.mark.parametrize(
     "model, litellm_params, expects_native_config",
     [

@@ -48,6 +48,7 @@ import re
 import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from functools import lru_cache, partial
+from importlib import resources
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Literal, TypeAlias, cast  # noqa: TID251  # entries as a caller wrote them
 
@@ -275,6 +276,12 @@ def _backend_cost_entry(
     return _MODEL_INFO_ADAPTER.validate_python(entry) if isinstance(entry, dict) else None
 
 
+@lru_cache(maxsize=1)
+def _legacy_openrouter_cache_rates() -> Mapping[str, Mapping[str, float]]:
+    snapshot: Final = resources.files("litellm.llms.openrouter").joinpath("legacy_cache_rates.json")
+    return TypeAdapter(dict[str, dict[str, float]]).validate_json(snapshot.read_bytes())
+
+
 def _inherited_cache_pricing(
     host: "PythonHost", model_info: Mapping[str, object], backend_model: str, provider: str | None
 ) -> Mapping[str, object]:
@@ -287,11 +294,15 @@ def _inherited_cache_pricing(
     missing_fields: Final = tuple(field for field in inherited_fields if model_info.get(field) is None)
     if not missing_fields:
         return {}
+    openrouter_model: Final = backend_model.startswith("openrouter/") and provider in (None, "openrouter")
+    snapshot: Final = _legacy_openrouter_cache_rates().get(backend_model, {}) if openrouter_model else {}
+    legacy: Final = {field: snapshot[field] for field in missing_fields if field in snapshot}
     try:
         backend_info: Final = _backend_model_info(host, backend_model, provider)
-    except Exception:  # noqa: BLE001  # an unmapped backend model contributes nothing
-        return {}
-    return {field: backend_info[field] for field in missing_fields if backend_info.get(field) is not None}
+    except Exception:  # noqa: BLE001  # an unmapped backend may use the legacy OpenRouter rate
+        return legacy
+    current: Final = {field: backend_info[field] for field in missing_fields if backend_info.get(field) is not None}
+    return {**legacy, **current}
 
 
 def _inherited_service_tier_pricing(
