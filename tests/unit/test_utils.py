@@ -3711,7 +3711,7 @@ class TestAdditionalDropParamsForNonOpenAIProviders:
 
 
 class TestExtraBodyCannotOverrideModel:
-    @pytest.mark.parametrize("custom_llm_provider", ["edenai", "openai", "azure"])
+    @pytest.mark.parametrize("custom_llm_provider", ["edenai", "openai", "azure", "custom_openai"])
     def test_extra_body_model_is_dropped_for_openai_compatible_providers(self, custom_llm_provider: str) -> None:
         from litellm.utils import add_provider_specific_params_to_optional_params
 

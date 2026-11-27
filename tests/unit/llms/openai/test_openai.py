@@ -2633,10 +2633,11 @@ _WIRE_REQUEST: Final = {
 }
 
 
+@pytest.mark.parametrize("provider", ("openai", "custom_openai"))
 @pytest.mark.parametrize("is_async", (False, True))
 @respx.mock
 async def test_chat_completion_sends_the_caller_params_extra_body_and_extra_headers_unchanged(
-    is_async: bool, monkeypatch: pytest.MonkeyPatch
+    is_async: bool, provider: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
     route: Final = respx.post("https://api.openai.com/v1/chat/completions").mock(
@@ -2644,11 +2645,13 @@ async def test_chat_completion_sends_the_caller_params_extra_body_and_extra_head
     )
     kwargs: Final = {
         **_WIRE_REQUEST,
-        "model": "openai/gpt-5.4",
+        "model": f"{provider}/gpt-5.4",
+        "cache_control": {"type": "ephemeral"},
+        "additional_drop_params": ["drop_me"],
         "api_base": "https://api.openai.com/v1",
         "api_key": "sk-test",
         "num_retries": 0,
-        "extra_body": {"vendor_flag": True},
+        "extra_body": {"vendor_flag": True, "cache_control": {"type": "old"}, "drop_me": True},
         "extra_headers": {"x-caller": "unit"},
     }
 
@@ -2658,7 +2661,7 @@ async def test_chat_completion_sends_the_caller_params_extra_body_and_extra_head
         litellm.completion(**kwargs)
 
     sent: Final = route.calls.last.request
-    assert json.loads(sent.content) == {**_WIRE_REQUEST, "vendor_flag": True}
+    assert json.loads(sent.content) == {**_WIRE_REQUEST, "vendor_flag": True, "cache_control": {"type": "ephemeral"}}
     assert sent.headers["x-caller"] == "unit"
     assert sent.headers["authorization"] == "Bearer sk-test"
 
